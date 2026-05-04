@@ -1,6 +1,6 @@
 # Mail Union
 
-Mail Union 是一个自托管的多邮箱统一管理后台，可以把多个邮箱集中到一个系统里统一收信、阅读、翻译、通知、附件管理、备份和恢复。
+Mail Union 是一个自托管的多邮箱统一管理后台，可以把多个 Email 邮箱集中到一个系统里统一收信、阅读、翻译、通知、附件管理、备份和恢复。
 
 ## 功能特点
 
@@ -13,22 +13,82 @@ Mail Union 是一个自托管的多邮箱统一管理后台，可以把多个邮
 - 通知默认发送摘要，点击链接查看完整邮件。
 - 通知支持普通模式和封面模式。
 - 内置普通邮件、验证码邮件、垃圾邮件、广告邮件、订单通知、订阅提醒封面。
-- 支持附件本地同步、分页查看、预览、下载和打开。
+- 支持附件本地同步、分页查看、预览、下载、打开和批量删除。
 - 支持系统备份和还原，可备份数据库、网站数据或全部数据。
 - 支持用户管理、管理员权限、后台登录有效期设置。
 - 默认运行端口为 `52080`。
 
 ## 技术栈
 
-- Node.js
+- Node.js 22+
 - `node:sqlite`
 - `imapflow`
 - `mailparser`
 - 原生 HTML / CSS / JavaScript
 
-## 快速启动
+## 一键安装部署
+
+### Linux 服务器
+
+在 Ubuntu / Debian / CentOS / Rocky / AlmaLinux 等常见服务器上执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-linux.sh | sudo bash
+```
+
+脚本会自动完成：
+
+- 检测并安装 Node.js 22+
+- 下载 GitHub 最新代码
+- 安装 npm 依赖
+- 生成 `.env` 并自动写入随机 `APP_SECRET`
+- 创建运行目录 `data`、`runtime/files`、`logs`
+- 创建 systemd 服务并设置开机自启
+- 启动服务并监听 `52080`
+- 尝试放行服务器防火墙端口
+
+自定义安装目录或端口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-linux.sh | sudo MAILUNION_INSTALL_DIR=/opt/mailunion PORT=52080 bash
+```
+
+服务管理：
+
+```bash
+sudo systemctl status mailunion
+sudo systemctl restart mailunion
+sudo journalctl -u mailunion -f
+```
+
+### Windows
+
+用管理员 PowerShell 执行：
 
 ```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-windows.ps1 | iex
+```
+
+脚本会自动完成：
+
+- 检测并通过 winget 安装 Node.js LTS
+- 下载 GitHub 最新代码
+- 安装 npm 依赖
+- 生成 `.env` 并自动写入随机 `APP_SECRET`
+- 创建 Windows 计划任务开机自启
+- 启动服务并监听 `52080`
+- 尝试添加 Windows 防火墙入站规则
+
+自定义安装目录或端口：
+
+```powershell
+iwr -UseBasicParsing https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-windows.ps1 -OutFile install-windows.ps1
+.\install-windows.ps1 -InstallDir "D:\MailUnion" -Port 52080
+```
+
+## 手动启动
+
+```bash
 npm install
 npm start
 ```
