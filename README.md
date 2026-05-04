@@ -28,6 +28,47 @@ Mail Union 是一个自托管的多邮箱统一管理后台，可以把多个 Em
 
 ## 一键安装部署
 
+### Docker 一条命令安装
+
+适合服务器部署、迁移和后续升级。数据会保存在服务器的 `/opt/mailunion-docker` 目录，不会因为容器重建而丢失。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo bash
+```
+
+脚本会自动完成：
+
+- 检测并安装 Docker 和 Docker Compose 插件。
+- 创建部署目录 `/opt/mailunion-docker`。
+- 生成 `.env` 并自动写入随机 `APP_SECRET`。
+- 拉取镜像 `ghcr.io/lening5202/mailunion:latest`。
+- 启动容器并设置 Docker 自动重启。
+- 监听 `52080` 端口。
+
+自定义镜像、目录或端口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_IMAGE=ghcr.io/lening5202/mailunion:latest MAILUNION_DOCKER_DIR=/opt/mailunion-docker PORT=52080 bash
+```
+
+Docker 版常用管理命令：
+
+```bash
+cd /opt/mailunion-docker
+sudo docker compose ps
+sudo docker compose logs -f
+sudo docker compose pull
+sudo docker compose up -d
+sudo docker compose restart
+```
+
+如果你想自己在本机用源码构建：
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
 ### Linux 服务器
 
 在 Ubuntu / Debian / CentOS / Rocky / AlmaLinux 等常见服务器上执行：
@@ -123,6 +164,61 @@ Copy-Item .env.example .env
 - `SESSION_TTL_DAYS`：默认登录有效期
 - `ADMIN_USERNAME`：初始化管理员用户名
 - `ADMIN_PASSWORD`：初始化管理员密码
+
+## 上传 Docker 仓库
+
+推荐优先使用 GitHub Container Registry，和 GitHub 仓库绑定，后续每次推送 `main` 分支都会通过 GitHub Actions 自动构建镜像：
+
+1. 把 GitHub 仓库设置为 Public。
+2. 推送代码到 GitHub。
+3. 打开 GitHub 仓库的 Actions，确认 `Docker Image` 工作流执行成功。
+4. 镜像地址为 `ghcr.io/lening5202/mailunion:latest`。
+
+也可以手动发布到 Docker Hub。先在 Docker Hub 创建仓库，例如 `你的DockerHub用户名/mailunion`，然后执行：
+
+```bash
+docker login
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t 你的DockerHub用户名/mailunion:latest --push .
+```
+
+发布后，服务器一条命令安装 Docker Hub 镜像：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_IMAGE=你的DockerHub用户名/mailunion:latest bash
+```
+
+Windows 本地推送也可以使用内置脚本：
+
+```powershell
+.\scripts\docker-publish.ps1 -Image 你的DockerHub用户名/mailunion:latest
+```
+
+Linux / macOS 本地推送：
+
+```bash
+bash scripts/docker-publish.sh 你的DockerHub用户名/mailunion:latest
+```
+
+## 开发和发布目录规则
+
+本项目本地开发固定使用以下目录规则：
+
+- 开发目录：`C:\Users\Administrator\Desktop\开发\MailUnion`
+- 轮转备份目录：`C:\Users\Administrator\Desktop\开发\backup`
+- GitHub 发布目录：`C:\Users\Administrator\Desktop\开发\github\MailUnion`
+
+备份规则为 `MailUnion1` 到 `MailUnion6`，其中 `MailUnion1` 是最新备份，超过 6 份自动覆盖最旧备份：
+
+```powershell
+.\scripts\backup-rotate.ps1
+```
+
+同步 GitHub 发布版会覆盖 `github\MailUnion` 目录，但会保留该目录内的 `.git`，并自动排除 `.env`、真实数据库、附件、日志、运行缓存和 `node_modules`：
+
+```powershell
+.\scripts\sync-github-release.ps1
+```
 
 ## 开源发布说明
 

@@ -1,0 +1,31 @@
+name: mailunion
+
+services:
+  mailunion:
+    build:
+      context: .
+    image: ${MAILUNION_IMAGE:-mailunion:local}
+    container_name: ${MAILUNION_CONTAINER_NAME:-mailunion}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 52080
+    ports:
+      - "${PORT:-52080}:52080"
+    volumes:
+      - mailunion_data:/app/data
+      - mailunion_runtime:/app/runtime
+      - mailunion_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:52080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  mailunion_data:
+  mailunion_runtime:
+  mailunion_logs:

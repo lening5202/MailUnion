@@ -11,6 +11,7 @@ runtime/
 logs/
 .codex-logs/
 .source-backups/
+.docker-build/
 *.log
 server.pid
 codex-server.stdout.log
