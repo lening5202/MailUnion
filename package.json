@@ -1,0 +1,22 @@
+{
+  "name": "mail-union-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-mailbox inbox MVP with IMAP sync",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check src/db.js && node --check src/auth.js && node --check src/auth-mail.js && node --check src/backup-service.js && node --check src/crypto.js && node --check src/google-oauth.js && node --check src/microsoft-oauth.js && node --check src/notification-service.js && node --check src/outbound-network.js && node --check src/providers.js && node --check src/remote-storage.js && node --check src/storage.js && node --check src/sync-service.js && node --check src/translation-service.js && node --check src/wecom-smartbot.js && node --check public/app.js && node --check public/ui.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1030.0",
+    "@wecom/aibot-node-sdk": "^1.0.4",
+    "archiver": "^7.0.1",
+    "basic-ftp": "^5.2.2",
+    "imapflow": "^1.2.18",
+    "mailparser": "^3.9.6",
+    "nodemailer": "^7.0.5",
+    "undici": "^7.16.0"
+  }
+}

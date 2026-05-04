@@ -1,0 +1,67 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mail Union Console</title>
+    <script>
+      (() => {
+        let saved = null;
+        try {
+          saved = window.localStorage.getItem('mail-union-theme');
+        } catch (_) {
+          saved = null;
+        }
+        const theme =
+          saved === 'dark' || saved === 'light'
+            ? saved
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+    <link
+      id="app-favicon"
+      rel="icon"
+      href="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='18' fill='%230f172a'/%3E%3Crect x='6' y='6' width='52' height='52' rx='16' fill='%2314b8a6' opacity='0.16'/%3E%3Crect x='9' y='9' width='46' height='46' rx='14' fill='%23111c2f'/%3E%3Ctext x='32' y='38' text-anchor='middle' font-family='Segoe UI, Arial, sans-serif' font-size='22' font-weight='800' fill='%23f8fafc'%3EMU%3C/text%3E%3C/svg%3E"
+    />
+    <link
+      id="app-touch-icon"
+      rel="apple-touch-icon"
+      href="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='18' fill='%230f172a'/%3E%3Crect x='6' y='6' width='52' height='52' rx='16' fill='%2314b8a6' opacity='0.16'/%3E%3Crect x='9' y='9' width='46' height='46' rx='14' fill='%23111c2f'/%3E%3Ctext x='32' y='38' text-anchor='middle' font-family='Segoe UI, Arial, sans-serif' font-size='22' font-weight='800' fill='%23f8fafc'%3EMU%3C/text%3E%3C/svg%3E"
+    />
+  <link rel="stylesheet" href="/styles.css?v=20260504-loader-stage-v1" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="boot-screen">
+        <div class="boot-screen-shell">
+          <div class="boot-screen-spinner-wrap" aria-hidden="true">
+            <div class="cyber-loader-container">
+              <div class="plasma-vial">
+                <div class="fluid-chamber">
+                  <div class="plasma-pool bottom-pool"></div>
+                  <div class="plasma-pool top-pool"></div>
+                  <div class="droplet d-1"></div>
+                  <div class="droplet d-2"></div>
+                  <div class="droplet d-3"></div>
+                  <div class="droplet d-4"></div>
+                  <div class="droplet d-5"></div>
+                </div>
+              </div>
+              <div class="vial-base"></div>
+            </div>
+          </div>
+          <div class="boot-screen-copy">
+            <strong>系统加载中</strong>
+            <p>正在初始化首页资源与登录状态，请稍候片刻...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  <script type="module" src="/app.js?v=20260504-loader-stage-v1"></script>
+  </body>
+</html>
+
+
