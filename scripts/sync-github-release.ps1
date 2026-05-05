@@ -52,6 +52,7 @@ $excludedRootItems = @(
   '.runtime',
   'logs',
   'node_modules',
+  'docs-local',
   '.codex-logs',
   '.source-backups',
   '.tmp-edge-profile'

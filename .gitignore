@@ -12,6 +12,7 @@ logs/
 .codex-logs/
 .source-backups/
 .docker-build/
+docs-local/
 *.log
 server.pid
 codex-server.stdout.log
