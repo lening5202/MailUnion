@@ -7,6 +7,8 @@ IMAGE="${MAILUNION_IMAGE:-ghcr.io/lening5202/mailunion:latest}"
 INSTALL_DIR="${MAILUNION_DOCKER_DIR:-/opt/mailunion-docker}"
 PORT="${PORT:-52080}"
 CONTAINER_NAME="${MAILUNION_CONTAINER_NAME:-mailunion}"
+BUILD_FROM_SOURCE="${MAILUNION_BUILD_FROM_SOURCE:-auto}"
+SOURCE_DIR="${INSTALL_DIR}/source"
 
 if [ "$(id -u)" -eq 0 ]; then
   SUDO=""
@@ -88,6 +90,11 @@ ensure_docker() {
   fi
 }
 
+ensure_archive_tools() {
+  command -v curl >/dev/null 2>&1 || ensure_package curl
+  command -v tar >/dev/null 2>&1 || ensure_package tar
+}
+
 new_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -122,7 +129,7 @@ MICROSOFT_TENANT_ID=common
 EOF
 }
 
-write_compose() {
+write_image_compose() {
   run_root tee "${INSTALL_DIR}/compose.yaml" >/dev/null <<EOF
 name: mailunion
 
@@ -151,6 +158,74 @@ services:
 EOF
 }
 
+write_source_compose() {
+  run_root tee "${INSTALL_DIR}/compose.yaml" >/dev/null <<EOF
+name: mailunion
+
+services:
+  mailunion:
+    build:
+      context: ./source
+    image: ${IMAGE}
+    container_name: ${CONTAINER_NAME}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 52080
+    ports:
+      - "${PORT}:52080"
+    volumes:
+      - ./data:/app/data
+      - ./runtime:/app/runtime
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:52080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+EOF
+}
+
+download_source() {
+  local tmp_dir
+  local archive_file
+  local extracted_dir
+  tmp_dir="$(mktemp -d)"
+  archive_file="${tmp_dir}/mailunion.tar.gz"
+
+  echo "Downloading source from GitHub..."
+  curl -fsSL "https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz" -o "${archive_file}"
+
+  run_root rm -rf "${SOURCE_DIR}"
+  run_root mkdir -p "${SOURCE_DIR}"
+  tar -xzf "${archive_file}" -C "${tmp_dir}"
+  extracted_dir="$(find "${tmp_dir}" -maxdepth 1 -type d -name 'MailUnion-*' -print -quit)"
+  if [ -z "${extracted_dir}" ]; then
+    echo "Failed to extract source archive." >&2
+    exit 1
+  fi
+
+  run_root cp -a "${extracted_dir}/." "${SOURCE_DIR}/"
+  rm -rf "${tmp_dir}"
+}
+
+start_with_image() {
+  write_image_compose
+  cd "${INSTALL_DIR}"
+  run_root docker compose pull
+  run_root docker compose up -d
+}
+
+start_with_source_build() {
+  download_source
+  write_source_compose
+  cd "${INSTALL_DIR}"
+  run_root docker compose up -d --build
+}
+
 wait_health() {
   local i
   for i in $(seq 1 45); do
@@ -167,18 +242,27 @@ echo "Repository : ${REPO} (${BRANCH})"
 echo "Image      : ${IMAGE}"
 echo "Install dir: ${INSTALL_DIR}"
 echo "Port       : ${PORT}"
+echo "Build mode : ${BUILD_FROM_SOURCE}"
 
-command -v curl >/dev/null 2>&1 || ensure_package curl
+ensure_archive_tools
 ensure_docker
 
-run_root mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/runtime/files" "${INSTALL_DIR}/logs"
+run_root mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/runtime/files" "${INSTALL_DIR}/logs" "${SOURCE_DIR}"
 run_root chown -R 1000:1000 "${INSTALL_DIR}/data" "${INSTALL_DIR}/runtime" "${INSTALL_DIR}/logs" || true
 write_env
-write_compose
 
-cd "${INSTALL_DIR}"
-run_root docker compose pull
-run_root docker compose up -d
+if [ "${BUILD_FROM_SOURCE}" = "1" ] || [ "${BUILD_FROM_SOURCE}" = "true" ] || [ "${BUILD_FROM_SOURCE}" = "source" ]; then
+  start_with_source_build
+elif [ "${BUILD_FROM_SOURCE}" = "0" ] || [ "${BUILD_FROM_SOURCE}" = "false" ] || [ "${BUILD_FROM_SOURCE}" = "image" ]; then
+  start_with_image
+else
+  if start_with_image; then
+    :
+  else
+    echo "Image pull failed. Falling back to local Docker build from GitHub source..."
+    start_with_source_build
+  fi
+fi
 
 if wait_health; then
   echo "Mail Union Docker is running: http://127.0.0.1:${PORT}"

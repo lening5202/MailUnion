@@ -41,7 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/i
 - 检测并安装 Docker 和 Docker Compose 插件。
 - 创建部署目录 `/opt/mailunion-docker`。
 - 生成 `.env` 并自动写入随机 `APP_SECRET`。
-- 拉取镜像 `ghcr.io/lening5202/mailunion:latest`。
+- 优先拉取镜像 `ghcr.io/lening5202/mailunion:latest`。
+- 如果镜像未公开或暂时拉取失败，会自动下载 GitHub 源码并在服务器本机 Docker 构建。
 - 启动容器并设置 Docker 自动重启。
 - 监听 `52080` 端口。
 
@@ -49,6 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/i
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_IMAGE=ghcr.io/lening5202/mailunion:latest MAILUNION_DOCKER_DIR=/opt/mailunion-docker PORT=52080 bash
+```
+
+如果镜像仓库还没公开，或者服务器提示 `denied`，可以强制直接从 GitHub 源码构建：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_BUILD_FROM_SOURCE=1 bash
 ```
 
 Docker 版常用管理命令：
