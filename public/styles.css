@@ -4619,17 +4619,20 @@ input[type='number'] {
 
 .version-popover-shell {
   position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: max(18px, calc(env(safe-area-inset-top, 0px) + 14px)) 16px 16px;
+  top: max(72px, calc(env(safe-area-inset-top, 0px) + 72px));
+  left: 76px;
+  z-index: 220;
+  width: min(336px, calc(100vw - 92px));
   pointer-events: none;
 }
 
 .version-popover-shell .version-popover {
   pointer-events: auto;
+}
+
+.app-shell.sidebar-collapsed ~ .version-popover-shell {
+  top: max(58px, calc(env(safe-area-inset-top, 0px) + 58px));
+  left: 78px;
 }
 
 .version-popover-head,
@@ -10306,7 +10309,15 @@ body.mailbox-dragging {
   }
 
   .version-popover-shell {
-    padding: max(12px, calc(env(safe-area-inset-top, 0px) + 10px)) 12px 12px;
+    top: max(84px, calc(env(safe-area-inset-top, 0px) + 84px));
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .app-shell.sidebar-collapsed ~ .version-popover-shell {
+    top: max(84px, calc(env(safe-area-inset-top, 0px) + 84px));
+    left: 12px;
   }
 
   .compact-field,
