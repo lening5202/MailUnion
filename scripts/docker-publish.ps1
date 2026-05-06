@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $Image) {
-  $Image = 'ghcr.io/lening5202/mailunion:latest'
+  $Image = 'lening5202/mailunion:latest'
 }
 
 if (-not $Platforms) {

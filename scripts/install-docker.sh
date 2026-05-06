@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="${MAILUNION_REPO:-lening5202/MailUnion}"
 BRANCH="${MAILUNION_BRANCH:-main}"
-IMAGE="${MAILUNION_IMAGE:-ghcr.io/lening5202/mailunion:latest}"
+IMAGE="${MAILUNION_IMAGE:-lening5202/mailunion:latest}"
 INSTALL_DIR="${MAILUNION_DOCKER_DIR:-/opt/mailunion-docker}"
 PORT="${PORT:-52080}"
 CONTAINER_NAME="${MAILUNION_CONTAINER_NAME:-mailunion}"

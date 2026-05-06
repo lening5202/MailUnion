@@ -32,13 +32,13 @@ Mail Union 是一个自托管的多邮箱统一管理后台，可以把多个 Em
 
 推荐优先使用 Docker 方式部署。Docker 会把程序和运行环境打包在一起，后续迁移、升级、重启都更简单。系统数据默认保存在服务器的 `/opt/mailunion-docker`，容器重建不会删除数据库和附件。
 
-在服务器 SSH 终端里执行：
+推荐使用 Docker Hub 镜像安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_BUILD_FROM_SOURCE=1 bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo bash
 ```
 
-该命令会自动检测并安装 Docker、下载代码、构建镜像、生成 `.env`、启动服务，并监听 `52080` 端口。
+该命令会自动检测并安装 Docker，优先拉取 `lening5202/mailunion:latest` 镜像，生成 `.env`，启动服务，并监听 `52080` 端口。如果镜像暂时拉取失败，脚本会自动切换为源码构建安装。
 
 安装完成后访问：
 
@@ -46,10 +46,10 @@ curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/i
 http://服务器公网IP:52080
 ```
 
-如果 Docker 镜像已经公开发布，也可以使用自动模式：
+如果你想强制从 GitHub 源码构建，可以执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_BUILD_FROM_SOURCE=1 bash
 ```
 
 ### 自定义 Docker 安装
@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/i
 修改安装目录、端口或镜像：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_DOCKER_DIR=/opt/mailunion-docker PORT=52080 MAILUNION_IMAGE=ghcr.io/lening5202/mailunion:latest bash
+curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_DOCKER_DIR=/opt/mailunion-docker PORT=52080 MAILUNION_IMAGE=lening5202/mailunion:latest bash
 ```
 
 参数说明：
@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/i
 | --- | --- |
 | `MAILUNION_DOCKER_DIR=/opt/mailunion-docker` | Docker 版安装目录，数据库、附件、日志都会保存在这里。 |
 | `PORT=52080` | 对外访问端口，Mail Union 默认永久使用 `52080`。 |
-| `MAILUNION_IMAGE=ghcr.io/lening5202/mailunion:latest` | 指定要拉取或构建的 Docker 镜像名称。 |
+| `MAILUNION_IMAGE=lening5202/mailunion:latest` | 指定要拉取或构建的 Docker 镜像名称。 |
 
 ### Docker 常用管理命令
 
@@ -113,7 +113,7 @@ sudo docker compose down
 Error response from daemon: error from registry: denied
 ```
 
-原因通常是 Docker 镜像包还没有发布，或者 GitHub Container Registry 的 Package 没有设置为 Public。解决办法是强制源码构建：
+原因通常是 Docker 镜像还没有发布成功，或者镜像仓库暂时无法访问。解决办法是强制源码构建：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lening5202/MailUnion/main/scripts/install-docker.sh | sudo MAILUNION_BUILD_FROM_SOURCE=1 bash

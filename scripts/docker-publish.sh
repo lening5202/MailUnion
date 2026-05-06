@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="${1:-${MAILUNION_IMAGE:-ghcr.io/lening5202/mailunion:latest}}"
+IMAGE="${1:-${MAILUNION_IMAGE:-lening5202/mailunion:latest}}"
 PLATFORMS="${MAILUNION_PLATFORMS:-linux/amd64,linux/arm64}"
 PUSH="${MAILUNION_PUSH:-1}"
 
