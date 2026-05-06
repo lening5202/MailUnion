@@ -5204,8 +5204,8 @@ function renderBackups(state) {
                 restoreModeMeta.id === 'database_only'
                   ? '仅覆盖当前系统数据库，适合账号、邮件记录和配置数据迁移。'
                   : restoreModeMeta.id === 'attachments_only'
-                    ? '仅覆盖本地附件目录，不改动数据库、日志和 .env 配置。'
-                    : '按备份包内包含的数据完整恢复当前系统，默认推荐使用这个模式。'
+                    ? '仅覆盖本地附件目录，不改动数据库和 .env 配置；运行日志不会还原。'
+                    : '按备份包内包含的数据恢复数据库、附件和 .env 配置；运行日志不会还原。'
               }
             </small>
           </label>

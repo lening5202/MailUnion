@@ -36,7 +36,6 @@ const BACKUP_RESTORE_COMPONENT_LABELS = Object.freeze({
   database: '数据库',
   envFile: '.env 配置文件',
   runtimeFiles: '本地附件目录',
-  logs: '系统日志目录',
 });
 const MAILBOX_VISIBLE_FIELDS_STORAGE_KEY = 'mail-union-mailbox-visible-fields';
 const MAILBOX_VISIBLE_FIELD_IDS = [
@@ -5950,8 +5949,8 @@ async function restoreBackupArchive() {
       restoreMode === 'database_only'
         ? '系统会先自动生成一份恢复前安全备份，然后仅覆盖当前数据库。还原完成后，当前后台会退出登录。'
         : restoreMode === 'attachments_only'
-          ? '系统会先自动生成一份恢复前安全备份，然后仅覆盖当前本地附件目录。数据库、日志和 .env 配置不会被改动。'
-          : '系统会先自动生成一份恢复前安全备份，然后按备份包内的数据完整恢复数据库、本地附件目录、日志和 .env 配置。若恢复包包含数据库，当前后台会退出登录。',
+          ? '系统会先自动生成一份恢复前安全备份，然后仅覆盖当前本地附件目录。数据库和 .env 配置不会被改动，运行日志不会还原。'
+          : '系统会先自动生成一份恢复前安全备份，然后按备份包内的数据恢复数据库、本地附件目录和 .env 配置。运行日志不会还原；若恢复包包含数据库，当前后台会退出登录。',
     confirmLabel: '开始还原',
     cancelLabel: '先取消',
     tone: 'danger',

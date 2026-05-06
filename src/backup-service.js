@@ -23,7 +23,6 @@ const BACKUP_ROOT = path.join(process.cwd(), 'runtime', 'backups');
 const RESTORE_WORK_ROOT = path.join(process.cwd(), 'runtime', 'restore-workspaces');
 const BACKUP_TICK_MS = 60 * 1000;
 const ENV_FILE = path.join(process.cwd(), '.env');
-const LOGS_ROOT = path.join(process.cwd(), 'logs');
 const DATABASE_SIDE_FILES = [`${databaseFile}-wal`, `${databaseFile}-shm`];
 
 function ensureBackupRoot() {
@@ -110,7 +109,7 @@ function buildBackupManifest(settings = {}) {
       database: plan.includeDatabase && fs.existsSync(databaseFile),
       envFile: plan.includeSiteData && fs.existsSync(ENV_FILE),
       runtimeFiles: plan.includeSiteData && fs.existsSync(STORAGE_ROOT),
-      logs: plan.includeSiteData && fs.existsSync(LOGS_ROOT),
+      logs: false,
     },
   };
 }
@@ -142,6 +141,53 @@ function resetDirectory(directoryPath = '') {
   fs.mkdirSync(directoryPath, { recursive: true });
 }
 
+function clearDirectoryContents(directoryPath = '') {
+  const normalizedPath = String(directoryPath || '').trim();
+  if (!normalizedPath) {
+    return;
+  }
+
+  fs.mkdirSync(normalizedPath, { recursive: true });
+  fs.readdirSync(normalizedPath).forEach((entryName) => {
+    safeRemovePath(path.join(normalizedPath, entryName));
+  });
+}
+
+function copyDirectoryContents(sourceDirectory = '', targetDirectory = '') {
+  const normalizedSource = String(sourceDirectory || '').trim();
+  const normalizedTarget = String(targetDirectory || '').trim();
+  if (!normalizedSource || !normalizedTarget || !fs.existsSync(normalizedSource)) {
+    return;
+  }
+
+  fs.mkdirSync(normalizedTarget, { recursive: true });
+  fs.readdirSync(normalizedSource, { withFileTypes: true }).forEach((entry) => {
+    const sourcePath = path.join(normalizedSource, entry.name);
+    const targetPath = path.join(normalizedTarget, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirectoryContents(sourcePath, targetPath);
+      return;
+    }
+
+    if (entry.isSymbolicLink()) {
+      const linkTarget = fs.readlinkSync(sourcePath);
+      ensureParentDirectory(targetPath);
+      try {
+        fs.symlinkSync(linkTarget, targetPath);
+      } catch (error) {
+        if (error?.code !== 'EEXIST') {
+          throw error;
+        }
+      }
+      return;
+    }
+
+    ensureParentDirectory(targetPath);
+    fs.copyFileSync(sourcePath, targetPath);
+  });
+}
+
 function createArchive(archivePath, settings = {}) {
   ensureBackupRoot();
   const plan = resolveBackupContentPlan(settings);
@@ -168,10 +214,6 @@ function createArchive(archivePath, settings = {}) {
 
     if (plan.includeSiteData && fs.existsSync(STORAGE_ROOT)) {
       archive.directory(STORAGE_ROOT, 'runtime/files');
-    }
-
-    if (plan.includeSiteData && fs.existsSync(LOGS_ROOT)) {
-      archive.directory(LOGS_ROOT, 'logs');
     }
 
     archive.append(JSON.stringify(buildBackupManifest(settings), null, 2), {
@@ -201,8 +243,7 @@ function backupLooksRecognizable(rootPath = '') {
     fs.existsSync(path.join(rootPath, 'manifest.json')) ||
     fs.existsSync(path.join(rootPath, 'data', 'mail-union.sqlite')) ||
     fs.existsSync(path.join(rootPath, '.env')) ||
-    fs.existsSync(path.join(rootPath, 'runtime', 'files')) ||
-    fs.existsSync(path.join(rootPath, 'logs'))
+    fs.existsSync(path.join(rootPath, 'runtime', 'files'))
   );
 }
 
@@ -254,7 +295,7 @@ function inspectExtractedBackup(extractRoot = '') {
     runtimeFiles: fs.existsSync(path.join(resolvedRoot, 'runtime', 'files')),
     logs: fs.existsSync(path.join(resolvedRoot, 'logs')),
   };
-  const hasSiteArtifacts = detected.envFile || detected.runtimeFiles || detected.logs;
+  const hasSiteArtifacts = detected.envFile || detected.runtimeFiles;
   const inferredContentMode = detected.database
     ? hasSiteArtifacts
       ? 'database_and_site'
@@ -267,7 +308,7 @@ function inspectExtractedBackup(extractRoot = '') {
     database: includeDatabase,
     envFile: includeSiteData && manifestDeclaresComponent(manifest, 'envFile', detected.envFile),
     runtimeFiles: includeSiteData && manifestDeclaresComponent(manifest, 'runtimeFiles', detected.runtimeFiles),
-    logs: includeSiteData && manifestDeclaresComponent(manifest, 'logs', detected.logs),
+    logs: false,
   };
 
   if (!includeDatabase && !includeSiteData) {
@@ -286,11 +327,7 @@ function inspectExtractedBackup(extractRoot = '') {
     throw new Error('备份包声明包含本地附件目录，但实际缺失 runtime/files。');
   }
 
-  if (declared.logs && !detected.logs) {
-    throw new Error('备份包声明包含日志目录，但实际缺失 logs。');
-  }
-
-  if (!declared.database && !declared.envFile && !declared.runtimeFiles && !declared.logs) {
+  if (!declared.database && !declared.envFile && !declared.runtimeFiles) {
     throw new Error('备份包里没有可用于系统还原的数据库、配置或站点数据。');
   }
 
@@ -306,7 +343,6 @@ function inspectExtractedBackup(extractRoot = '') {
       database: path.join(resolvedRoot, 'data', 'mail-union.sqlite'),
       envFile: path.join(resolvedRoot, '.env'),
       runtimeFiles: path.join(resolvedRoot, 'runtime', 'files'),
-      logs: path.join(resolvedRoot, 'logs'),
     },
   };
 }
@@ -574,13 +610,6 @@ function appendSiteDataRestoreActions(actions, inspection) {
       sourcePath: inspection.sources.runtimeFiles,
       targetPath: STORAGE_ROOT,
     },
-    {
-      key: 'logs',
-      label: 'logs',
-      kind: 'directory',
-      sourcePath: inspection.sources.logs,
-      targetPath: LOGS_ROOT,
-    },
   ].forEach((entry) => {
     const shouldRestore = Boolean(inspection.declared[entry.key]);
     const shouldClear = Boolean(inspection.manifest) && !shouldRestore;
@@ -650,11 +679,18 @@ function applyRestoreActions(actions = [], workRoot = '') {
     actions.forEach((action, index) => {
       if (fs.existsSync(action.targetPath)) {
         const rollbackPath = path.join(rollbackRoot, rollbackFileNameForAction(action, index));
-        ensureParentDirectory(rollbackPath);
-        fs.renameSync(action.targetPath, rollbackPath);
+        if (action.kind === 'directory') {
+          fs.mkdirSync(rollbackPath, { recursive: true });
+          copyDirectoryContents(action.targetPath, rollbackPath);
+          clearDirectoryContents(action.targetPath);
+        } else {
+          ensureParentDirectory(rollbackPath);
+          fs.renameSync(action.targetPath, rollbackPath);
+        }
         rollbackEntries.push({
           targetPath: action.targetPath,
           rollbackPath,
+          kind: action.kind,
         });
       }
 
@@ -663,11 +699,8 @@ function applyRestoreActions(actions = [], workRoot = '') {
       }
 
       if (action.kind === 'directory') {
-        ensureParentDirectory(action.targetPath);
-        fs.cpSync(action.sourcePath, action.targetPath, {
-          recursive: true,
-          force: true,
-        });
+        fs.mkdirSync(action.targetPath, { recursive: true });
+        copyDirectoryContents(action.sourcePath, action.targetPath);
         return;
       }
 
@@ -681,6 +714,11 @@ function applyRestoreActions(actions = [], workRoot = '') {
       .slice()
       .reverse()
       .forEach((action) => {
+        if (action.kind === 'directory') {
+          clearDirectoryContents(action.targetPath);
+          return;
+        }
+
         safeRemovePath(action.targetPath);
       });
 
@@ -691,6 +729,12 @@ function applyRestoreActions(actions = [], workRoot = '') {
         if (!fs.existsSync(entry.rollbackPath)) {
           return;
         }
+        if (entry.kind === 'directory') {
+          clearDirectoryContents(entry.targetPath);
+          copyDirectoryContents(entry.rollbackPath, entry.targetPath);
+          return;
+        }
+
         ensureParentDirectory(entry.targetPath);
         fs.renameSync(entry.rollbackPath, entry.targetPath);
       });
@@ -929,8 +973,20 @@ class BackupService {
           .slice()
           .reverse()
           .forEach((entry) => {
-            safeRemovePath(entry.targetPath);
+            if (entry.kind === 'directory') {
+              clearDirectoryContents(entry.targetPath);
+            } else {
+              safeRemovePath(entry.targetPath);
+            }
+
             if (fs.existsSync(entry.rollbackPath)) {
+              if (entry.kind === 'directory') {
+                fs.mkdirSync(entry.targetPath, { recursive: true });
+                clearDirectoryContents(entry.targetPath);
+                copyDirectoryContents(entry.rollbackPath, entry.targetPath);
+                return;
+              }
+
               ensureParentDirectory(entry.targetPath);
               fs.renameSync(entry.rollbackPath, entry.targetPath);
             }
