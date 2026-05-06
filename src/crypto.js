@@ -24,14 +24,21 @@ function encrypt(plainText) {
 }
 
 function decrypt(cipherText) {
-  const [ivBase64, tagBase64, payloadBase64] = String(cipherText).split(':');
-  const decipher = createDecipheriv('aes-256-gcm', getKey(), Buffer.from(ivBase64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagBase64, 'base64'));
+  try {
+    const [ivBase64, tagBase64, payloadBase64] = String(cipherText).split(':');
+    const decipher = createDecipheriv('aes-256-gcm', getKey(), Buffer.from(ivBase64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagBase64, 'base64'));
 
-  return Buffer.concat([
-    decipher.update(Buffer.from(payloadBase64, 'base64')),
-    decipher.final(),
-  ]).toString('utf8');
+    return Buffer.concat([
+      decipher.update(Buffer.from(payloadBase64, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch (error) {
+    const wrapped = new Error('Encrypted data cannot be decrypted with the current APP_SECRET.');
+    wrapped.code = 'APP_SECRET_DECRYPT_FAILED';
+    wrapped.cause = error;
+    throw wrapped;
+  }
 }
 
 function toBase64Url(value) {

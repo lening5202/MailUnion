@@ -445,6 +445,20 @@ function decryptMaybe(value) {
   return String(value || '').trim() ? decrypt(value) : '';
 }
 
+function normalizeCredentialError(error) {
+  if (
+    error?.code === 'APP_SECRET_DECRYPT_FAILED' ||
+    /unable to authenticate data|unsupported state|bad decrypt|decrypt/i.test(String(error?.message || ''))
+  ) {
+    const next = new Error('邮箱密码或授权信息无法解密，请使用包含原系统 APP_SECRET 的完整备份包重新还原，或重新编辑该邮箱并保存密码/授权。');
+    next.code = 'MAILBOX_SECRET_DECRYPT_FAILED';
+    next.cause = error;
+    return next;
+  }
+
+  return error;
+}
+
 function getSystemMicrosoftOauthConfig() {
   const settings = getSystemSettings();
   return {
@@ -1084,25 +1098,29 @@ async function listGraphAttachments(accessToken, messageId = '', options = {}) {
 }
 
 async function buildClientConfig(mailbox) {
-  if (isGoogleOAuthMailbox(mailbox)) {
-    return buildGoogleOAuthClientConfig(mailbox);
-  }
+  try {
+    if (isGoogleOAuthMailbox(mailbox)) {
+      return buildGoogleOAuthClientConfig(mailbox);
+    }
 
-  if (isMicrosoftOAuthMailbox(mailbox)) {
-    return buildMicrosoftOAuthClientConfig(mailbox);
-  }
+    if (isMicrosoftOAuthMailbox(mailbox)) {
+      return buildMicrosoftOAuthClientConfig(mailbox);
+    }
 
-  return {
-    host: mailbox.imap_host,
-    port: Number(mailbox.imap_port),
-    secure: Boolean(mailbox.secure),
-    auth: {
-      user: mailbox.username,
-      pass: decrypt(mailbox.password_encrypted),
-    },
-    logger: false,
-    disableAutoIdle: true,
-  };
+    return {
+      host: mailbox.imap_host,
+      port: Number(mailbox.imap_port),
+      secure: Boolean(mailbox.secure),
+      auth: {
+        user: mailbox.username,
+        pass: decrypt(mailbox.password_encrypted),
+      },
+      logger: false,
+      disableAutoIdle: true,
+    };
+  } catch (error) {
+    throw normalizeCredentialError(error);
+  }
 }
 
 function describeClientTarget(mailbox = {}) {

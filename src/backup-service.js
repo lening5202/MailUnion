@@ -279,6 +279,28 @@ function mergeRestoredEnvFile(sourcePath = '', targetPath = '', options = {}) {
   fs.writeFileSync(targetPath, serializeEnvPairs(mergedPairs), 'utf8');
 }
 
+function syncProcessSecretFromEnvFile(filePath = ENV_FILE) {
+  const envPairs = readEnvPairs(filePath);
+  const restoredSecret = String(envPairs.get('APP_SECRET') || '').trim();
+  if (restoredSecret) {
+    process.env.APP_SECRET = restoredSecret;
+  }
+}
+
+function mergeRestoredAppSecret(sourcePath = '', targetPath = '') {
+  const restoredPairs = readEnvPairs(sourcePath);
+  const restoredSecret = String(restoredPairs.get('APP_SECRET') || '').trim();
+  if (!restoredSecret) {
+    return;
+  }
+
+  const currentPairs = readEnvPairs(targetPath);
+  currentPairs.set('APP_SECRET', restoredSecret);
+  currentPairs.set('PORT', FIXED_RUNTIME_PORT);
+  ensureParentDirectory(targetPath);
+  fs.writeFileSync(targetPath, serializeEnvPairs(currentPairs), 'utf8');
+}
+
 function createArchive(archivePath, settings = {}) {
   ensureBackupRoot();
   const plan = resolveBackupContentPlan(settings);
@@ -726,6 +748,18 @@ function buildRestoreActions(inspection, restoreMode = 'full_site_data') {
       throw new Error('当前备份包不包含数据库，无法执行“仅导入数据库”。');
     }
     appendDatabaseRestoreActions(actions, inspection);
+    if (inspection.detected.envFile) {
+      actions.push({
+        key: 'appSecret',
+        label: 'appSecret',
+        kind: 'file',
+        restore: true,
+        clearOnly: false,
+        sourcePath: inspection.sources.envFile,
+        targetPath: ENV_FILE,
+        includeInSummary: false,
+      });
+    }
     return actions;
   }
 
@@ -800,6 +834,12 @@ function applyRestoreActions(actions = [], workRoot = '') {
 
       if (action.key === 'envFile') {
         mergeRestoredEnvFile(action.sourcePath, action.targetPath, { currentPairs: currentEnvPairs, restoreDatabase });
+        touchedActions.push(action);
+        return;
+      }
+
+      if (action.key === 'appSecret') {
+        mergeRestoredAppSecret(action.sourcePath, action.targetPath);
         touchedActions.push(action);
         return;
       }
@@ -1063,6 +1103,9 @@ class BackupService {
       }
 
       rollbackEntries = applyRestoreActions(restoreActions, workRoot);
+      if (restoreIncludesDatabase) {
+        syncProcessSecretFromEnvFile(ENV_FILE);
+      }
       if (restoreIncludesDatabase) {
         reopenDatabaseConnection();
         databaseClosed = false;
