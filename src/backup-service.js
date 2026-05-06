@@ -190,6 +190,52 @@ function copyDirectoryContents(sourceDirectory = '', targetDirectory = '') {
   });
 }
 
+function movePathSafely(sourcePath = '', targetPath = '', expectedKind = '') {
+  const normalizedSource = String(sourcePath || '').trim();
+  const normalizedTarget = String(targetPath || '').trim();
+  if (!normalizedSource || !normalizedTarget || !fs.existsSync(normalizedSource)) {
+    return;
+  }
+
+  ensureParentDirectory(normalizedTarget);
+  try {
+    fs.renameSync(normalizedSource, normalizedTarget);
+    return;
+  } catch (error) {
+    if (error?.code !== 'EXDEV') {
+      throw error;
+    }
+  }
+
+  // Docker volumes can put /app/data and /app/runtime on different devices.
+  // In that case rename cannot cross devices, so copy first and remove after.
+  const sourceStats = fs.lstatSync(normalizedSource);
+  safeRemovePath(normalizedTarget);
+
+  if (sourceStats.isDirectory()) {
+    fs.mkdirSync(normalizedTarget, { recursive: true });
+    copyDirectoryContents(normalizedSource, normalizedTarget);
+    safeRemovePath(normalizedSource);
+    return;
+  }
+
+  if (sourceStats.isSymbolicLink()) {
+    const linkTarget = fs.readlinkSync(normalizedSource);
+    fs.symlinkSync(linkTarget, normalizedTarget);
+    safeRemovePath(normalizedSource);
+    return;
+  }
+
+  if (expectedKind === 'directory') {
+    fs.mkdirSync(normalizedTarget, { recursive: true });
+    safeRemovePath(normalizedSource);
+    return;
+  }
+
+  fs.copyFileSync(normalizedSource, normalizedTarget);
+  safeRemovePath(normalizedSource);
+}
+
 function readEnvPairs(filePath = '') {
   if (!filePath || !fs.existsSync(filePath)) {
     return new Map();
@@ -719,6 +765,7 @@ function applyRestoreActions(actions = [], workRoot = '') {
   const rollbackRoot = path.join(workRoot, 'rollback');
   fs.mkdirSync(rollbackRoot, { recursive: true });
   const rollbackEntries = [];
+  const touchedActions = [];
   const restoreDatabase = actions.some((action) => action.key === 'database' && action.restore);
 
   try {
@@ -731,8 +778,7 @@ function applyRestoreActions(actions = [], workRoot = '') {
           copyDirectoryContents(action.targetPath, rollbackPath);
           clearDirectoryContents(action.targetPath);
         } else {
-          ensureParentDirectory(rollbackPath);
-          fs.renameSync(action.targetPath, rollbackPath);
+          movePathSafely(action.targetPath, rollbackPath, action.kind);
         }
         rollbackEntries.push({
           targetPath: action.targetPath,
@@ -748,21 +794,24 @@ function applyRestoreActions(actions = [], workRoot = '') {
       if (action.kind === 'directory') {
         fs.mkdirSync(action.targetPath, { recursive: true });
         copyDirectoryContents(action.sourcePath, action.targetPath);
+        touchedActions.push(action);
         return;
       }
 
       if (action.key === 'envFile') {
         mergeRestoredEnvFile(action.sourcePath, action.targetPath, { currentPairs: currentEnvPairs, restoreDatabase });
+        touchedActions.push(action);
         return;
       }
 
       ensureParentDirectory(action.targetPath);
       fs.copyFileSync(action.sourcePath, action.targetPath);
+      touchedActions.push(action);
     });
 
     return rollbackEntries;
   } catch (error) {
-    actions
+    touchedActions
       .slice()
       .reverse()
       .forEach((action) => {
@@ -788,7 +837,7 @@ function applyRestoreActions(actions = [], workRoot = '') {
         }
 
         ensureParentDirectory(entry.targetPath);
-        fs.renameSync(entry.rollbackPath, entry.targetPath);
+        movePathSafely(entry.rollbackPath, entry.targetPath, entry.kind);
       });
 
     throw error;
@@ -1056,7 +1105,7 @@ class BackupService {
               }
 
               ensureParentDirectory(entry.targetPath);
-              fs.renameSync(entry.rollbackPath, entry.targetPath);
+              movePathSafely(entry.rollbackPath, entry.targetPath, entry.kind);
             }
           });
       }

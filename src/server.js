@@ -153,13 +153,27 @@ let appUpdateState = {
   output: '',
 };
 
-const bootstrapResult = bootstrapAdmin({
-  name: DEFAULT_ADMIN_NAME,
-  username: DEFAULT_ADMIN_USERNAME,
-  email: DEFAULT_ADMIN_EMAIL,
-  avatarUrl: String(process.env.ADMIN_AVATAR_URL || '').trim(),
-  passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-});
+function ensureDefaultAdminAccount(options = {}) {
+  return bootstrapAdmin({
+    name: DEFAULT_ADMIN_NAME,
+    username: DEFAULT_ADMIN_USERNAME,
+    email: DEFAULT_ADMIN_EMAIL,
+    avatarUrl: String(process.env.ADMIN_AVATAR_URL || '').trim(),
+    passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+    resetPassword: Boolean(options.resetPassword),
+  });
+}
+
+const bootstrapResult = ensureDefaultAdminAccount();
+
+function recoverDefaultAdminAccount(reason = '') {
+  try {
+    return ensureDefaultAdminAccount({ resetPassword: true });
+  } catch (error) {
+    console.warn('[auth] default admin recovery failed:', reason, String(error.message || error));
+    return null;
+  }
+}
 
 function sanitizeUser(user) {
   if (!user) {
@@ -5899,6 +5913,9 @@ async function handleApi(request, response, url) {
       const restoreResult = await backupService.restoreBackupArchive(uploadPath, {
         restoreMode,
       });
+      if (restoreResult.requiresReauth) {
+        recoverDefaultAdminAccount('after database restore');
+      }
       const restoredSettings = getSystemSettings();
       const warnings = [];
       try {

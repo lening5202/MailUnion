@@ -2055,6 +2055,9 @@ function bootstrapAdmin(input) {
       if (existingAdmin.role !== 'admin') {
         adminUpdates.role = 'admin';
       }
+      if (input.resetPassword) {
+        adminUpdates.passwordHash = input.passwordHash;
+      }
       if (Object.keys(adminUpdates).length) {
         updateUser(existingAdmin.id, adminUpdates);
       }
