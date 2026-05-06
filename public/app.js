@@ -1297,6 +1297,19 @@ const state = {
   attachmentMetadataBulkDeleteLoading: false,
   confirmDialog: null,
   topbarAccountMenuOpen: false,
+  appVersion: {
+    current: null,
+    latest: null,
+    checkedAt: '',
+    isNewer: false,
+    error: '',
+    updateEnabled: false,
+    updateRunning: false,
+    updateState: null,
+  },
+  appVersionCheckLoading: false,
+  appVersionUpdateLoading: false,
+  appVersionPopoverOpen: false,
   systemStorageSecretVisibility: {
     storageS3Secret: false,
     storageWebdavPassword: false,
@@ -4167,6 +4180,119 @@ async function loadSession() {
   state.usersForAssignment = data.usersForAssignment || [];
 }
 
+function applyVersionPayload(payload = {}) {
+  const current = payload.current || payload.currentVersion || state.appVersion.current || null;
+  const latest = payload.latest || state.appVersion.latest || null;
+  const updateState = payload.updateState || current?.updateState || state.appVersion.updateState || null;
+  state.appVersion = {
+    ...state.appVersion,
+    current,
+    latest,
+    checkedAt: payload.checkedAt || state.appVersion.checkedAt || '',
+    isNewer: Boolean(payload.isNewer),
+    error: String(payload.error || ''),
+    updateEnabled: Boolean(payload.updateEnabled ?? current?.updateEnabled ?? state.appVersion.updateEnabled),
+    updateRunning: Boolean(payload.updateRunning ?? current?.updateRunning ?? updateState?.running),
+    updateState,
+  };
+}
+
+async function loadAppVersion() {
+  const data = await api('/api/version', {}, { allowUnauthorized: true });
+  applyVersionPayload(data || {});
+}
+
+async function checkAppVersion(options = {}) {
+  const force = Boolean(options.force);
+  state.appVersionCheckLoading = true;
+  if (force) {
+    redraw();
+  }
+
+  try {
+    const data = await api(`/api/version/check${force ? '?force=1' : ''}`);
+    applyVersionPayload(data || {});
+    if (force) {
+      state.notice = {
+        text: state.appVersion.isNewer
+          ? `发现新版本 ${state.appVersion.latest?.tag || ''}，可以查看 GitHub Release。`
+          : state.appVersion.error
+            ? `版本检查失败：${state.appVersion.error}`
+            : '当前已经是最新版本。',
+        tone: state.appVersion.error ? 'error' : state.appVersion.isNewer ? 'info' : 'success',
+      };
+    }
+  } catch (error) {
+    state.appVersion = {
+      ...state.appVersion,
+      error: String(error.message || error),
+    };
+    if (force) {
+      state.notice = {
+        text: `版本检查失败：${error.message}`,
+        tone: 'error',
+      };
+    }
+  } finally {
+    state.appVersionCheckLoading = false;
+  }
+}
+
+async function startAppUpdate() {
+  if (state.user?.role !== 'admin') {
+    state.notice = {
+      text: '只有管理员可以执行系统更新。',
+      tone: 'error',
+    };
+    return;
+  }
+
+  if (!state.appVersion.updateEnabled) {
+    state.notice = {
+      text: '当前未配置 MAILUNION_UPDATE_COMMAND，只能查看新版本，不能在后台直接更新。',
+      tone: 'info',
+    };
+    return;
+  }
+
+  const latestTag = state.appVersion.latest?.tag || '最新版本';
+  const confirmed = await openConfirmDialog({
+    eyebrow: '系统更新',
+    title: `确认执行更新到 ${latestTag}？`,
+    message: '系统会执行服务器上预先配置的更新命令。请确认你已经做好备份，并且更新命令会按当前部署方式完成拉取、安装和重启。',
+    confirmLabel: '执行更新',
+    cancelLabel: '取消',
+    tone: 'danger',
+    icon: 'system',
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
+  state.appVersionUpdateLoading = true;
+  redraw();
+
+  try {
+    const data = await api('/api/version/update', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    applyVersionPayload(data || {});
+    state.notice = {
+      text: data.message || '更新命令已开始执行。',
+      tone: 'success',
+    };
+  } catch (error) {
+    state.notice = {
+      text: `更新启动失败：${error.message}`,
+      tone: 'error',
+    };
+  } finally {
+    state.appVersionUpdateLoading = false;
+  }
+}
+
 async function loadProviders() {
   const data = await api('/api/providers');
   state.providers = data.providers || [];
@@ -6521,6 +6647,7 @@ document.addEventListener('click', async (event) => {
   const clickedInsideInboxMailboxFilter = Boolean(event.target.closest('[data-inbox-mailbox-filter]'));
   const clickedInsideMailboxColumns = Boolean(event.target.closest('[data-mailbox-columns]'));
   const clickedInsideTopbarAccount = Boolean(event.target.closest('[data-topbar-account]'));
+  const clickedInsideVersionWidget = Boolean(event.target.closest('[data-version-widget]'));
   let closedInlineFilter = false;
   if (state.mailboxToolbarOwnerFilterOpen && !clickedInsideMailboxToolbarOwnerFilter) {
     state.mailboxToolbarOwnerFilterOpen = false;
@@ -6554,10 +6681,14 @@ document.addEventListener('click', async (event) => {
     state.mailboxColumnMenuOpen = false;
     closedInlineFilter = true;
   }
+  if (state.appVersionPopoverOpen && !clickedInsideVersionWidget) {
+    state.appVersionPopoverOpen = false;
+    closedInlineFilter = true;
+  }
   if (
     closedInlineFilter &&
     !event.target.closest(
-      '[data-action], [data-view], [data-mailbox-guide-overlay], [data-mailbox-import-overlay], [data-notification-guide-overlay], [data-notification-cover-editor-overlay], [data-notification-channel-editor-overlay], [data-notification-tool-overlay], [data-system-google-guide-overlay], [data-system-microsoft-guide-overlay], [data-mailbox-overlay], [data-user-overlay], [data-message-reader-overlay], [data-attachment-preview-overlay], [data-confirm-overlay]',
+      '[data-action], [data-view], [data-version-widget], [data-mailbox-guide-overlay], [data-mailbox-import-overlay], [data-notification-guide-overlay], [data-notification-cover-editor-overlay], [data-notification-channel-editor-overlay], [data-notification-tool-overlay], [data-system-google-guide-overlay], [data-system-microsoft-guide-overlay], [data-mailbox-overlay], [data-user-overlay], [data-message-reader-overlay], [data-attachment-preview-overlay], [data-confirm-overlay]',
     )
   ) {
     redraw();
@@ -6688,6 +6819,27 @@ document.addEventListener('click', async (event) => {
     if (action === 'toggle-sidebar') {
       state.sidebarCollapsed = !state.sidebarCollapsed;
       persistSidebarCollapsed();
+      redraw();
+      return;
+    }
+    if (action === 'toggle-app-version-popover') {
+      state.appVersionPopoverOpen = !state.appVersionPopoverOpen;
+      redraw();
+      if (state.appVersionPopoverOpen && state.user && !state.appVersion.checkedAt && !state.appVersionCheckLoading) {
+        await checkAppVersion({ force: false });
+        redraw();
+      }
+      return;
+    }
+    if (action === 'check-app-version') {
+      state.appVersionPopoverOpen = true;
+      await checkAppVersion({ force: true });
+      redraw();
+      return;
+    }
+    if (action === 'start-app-update') {
+      state.appVersionPopoverOpen = true;
+      await startAppUpdate();
       redraw();
       return;
     }
@@ -7028,6 +7180,7 @@ document.addEventListener('click', async (event) => {
       stopWorkspaceAutoRefresh();
       state.user = null;
       state.topbarAccountMenuOpen = false;
+      state.appVersionPopoverOpen = false;
       clearNotificationConfigState();
       clearNotificationDraftState();
       state.backups = [];
@@ -8280,6 +8433,7 @@ async function boot() {
   if (bootResults[1]?.status !== 'fulfilled') {
     state.user = null;
   }
+  await loadAppVersion().catch(() => {});
 
   syncPortalStateFromLocation();
   state.ready = true;
@@ -8299,6 +8453,7 @@ async function boot() {
     await refreshWorkspace();
     consumeOauthRedirectNotice();
     scheduleWorkspaceAutoRefresh(1200);
+    checkAppVersion({ force: false }).then(() => redraw()).catch(() => {});
   } else {
     if (state.portalPath !== '/' && state.portalPath !== '/login') {
       replacePortalPath('/login');

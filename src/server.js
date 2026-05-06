@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
+const { exec } = require('node:child_process');
 const { createDecipheriv, createHash, randomInt, randomUUID } = require('node:crypto');
 const { URL } = require('node:url');
 
@@ -105,6 +106,7 @@ const { testTranslationConfig, translateMessage, translateTextContent } = requir
 const { MailSyncService } = require('./sync-service');
 const {
   applyRuntimeProxyEnvironment,
+  fetchWithOutboundProxy,
   normalizeOutboundProxyBypass,
   normalizeOutboundProxyMode,
   normalizeProxyUrl,
@@ -131,8 +133,24 @@ const BACKUP_RESTORE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const MICROSOFT_PERSONAL_DOMAINS = new Set(['outlook.com', 'hotmail.com', 'live.com', 'msn.com']);
 const GOOGLE_OAUTH_REQUEST_TTL_MS = 15 * 60 * 1000;
 const MICROSOFT_OAUTH_REQUEST_TTL_MS = 15 * 60 * 1000;
+const APP_REPOSITORY_OWNER = trimString(process.env.MAILUNION_REPO_OWNER || 'lening5202');
+const APP_REPOSITORY_NAME = trimString(process.env.MAILUNION_REPO_NAME || 'MailUnion');
+const APP_REPOSITORY = `${APP_REPOSITORY_OWNER}/${APP_REPOSITORY_NAME}`;
+const APP_REPOSITORY_URL = `https://github.com/${APP_REPOSITORY}`;
+const VERSION_CHECK_CACHE_MS = 10 * 60 * 1000;
+const VERSION_UPDATE_COMMAND = trimString(process.env.MAILUNION_UPDATE_COMMAND || '');
 const googleOAuthRequests = new Map();
 const microsoftOAuthRequests = new Map();
+let cachedPackageMetadata = null;
+let versionCheckCache = null;
+let appUpdateState = {
+  running: false,
+  startedAt: '',
+  finishedAt: '',
+  exitCode: null,
+  error: '',
+  output: '',
+};
 
 const bootstrapResult = bootstrapAdmin({
   name: DEFAULT_ADMIN_NAME,
@@ -246,6 +264,252 @@ function sanitizeDashboard(summary) {
 
 function trimString(value) {
   return String(value || '').trim();
+}
+
+function readPackageMetadata() {
+  if (cachedPackageMetadata) {
+    return cachedPackageMetadata;
+  }
+
+  try {
+    const packageFile = path.join(process.cwd(), 'package.json');
+    cachedPackageMetadata = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+  } catch (_) {
+    cachedPackageMetadata = {};
+  }
+
+  return cachedPackageMetadata;
+}
+
+function normalizeVersionTag(value = '') {
+  const normalized = trimString(value).replace(/^v+/i, '');
+  return normalized || '0.0.0';
+}
+
+function formatVersionTag(value = '') {
+  const normalized = normalizeVersionTag(value);
+  return normalized ? `v${normalized}` : 'v0.0.0';
+}
+
+function parseVersionParts(value = '') {
+  const normalized = normalizeVersionTag(value);
+  const [corePart, preReleasePart = ''] = normalized.split('-', 2);
+  const numbers = corePart
+    .split('.')
+    .map((item) => Number.parseInt(item, 10))
+    .map((item) => (Number.isFinite(item) ? item : 0));
+
+  return {
+    numbers,
+    preRelease: trimString(preReleasePart),
+  };
+}
+
+function compareVersions(a = '', b = '') {
+  const left = parseVersionParts(a);
+  const right = parseVersionParts(b);
+  const maxLength = Math.max(left.numbers.length, right.numbers.length, 3);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftNumber = Number(left.numbers[index] || 0);
+    const rightNumber = Number(right.numbers[index] || 0);
+    if (leftNumber > rightNumber) {
+      return 1;
+    }
+    if (leftNumber < rightNumber) {
+      return -1;
+    }
+  }
+
+  if (left.preRelease && !right.preRelease) {
+    return -1;
+  }
+  if (!left.preRelease && right.preRelease) {
+    return 1;
+  }
+  return left.preRelease.localeCompare(right.preRelease, 'en-US', { numeric: true });
+}
+
+function safeUpdateState(options = {}) {
+  const includeOutput = Boolean(options.includeOutput);
+  return {
+    running: Boolean(appUpdateState.running),
+    startedAt: appUpdateState.startedAt,
+    finishedAt: appUpdateState.finishedAt,
+    exitCode: appUpdateState.exitCode,
+    error: appUpdateState.error,
+    output: includeOutput ? appUpdateState.output : '',
+  };
+}
+
+function currentAppVersionInfo(options = {}) {
+  const metadata = readPackageMetadata();
+  const version = normalizeVersionTag(metadata.version || process.env.npm_package_version || '0.1.0');
+
+  return {
+    name: trimString(metadata.name || 'mail-union-mvp'),
+    version,
+    tag: formatVersionTag(version),
+    repository: APP_REPOSITORY,
+    repositoryUrl: APP_REPOSITORY_URL,
+    releaseUrl: `${APP_REPOSITORY_URL}/releases/tag/${formatVersionTag(version)}`,
+    latestReleaseUrl: `${APP_REPOSITORY_URL}/releases/latest`,
+    updateEnabled: Boolean(VERSION_UPDATE_COMMAND),
+    updateRunning: Boolean(appUpdateState.running),
+    updateState: safeUpdateState(options),
+  };
+}
+
+function sanitizeGitHubRelease(release = {}) {
+  const tag = formatVersionTag(release.tag_name || release.name || '');
+  const version = normalizeVersionTag(tag);
+
+  return {
+    tag,
+    version,
+    name: trimString(release.name || tag),
+    url: trimString(release.html_url || `${APP_REPOSITORY_URL}/releases/tag/${tag}`),
+    body: trimString(release.body || '').slice(0, 1200),
+    publishedAt: trimString(release.published_at || release.created_at || ''),
+    prerelease: Boolean(release.prerelease),
+    draft: Boolean(release.draft),
+  };
+}
+
+async function fetchLatestGitHubRelease(options = {}) {
+  const response = await fetchWithOutboundProxy(
+    `https://api.github.com/repos/${APP_REPOSITORY}/releases/latest`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `mail-union/${currentAppVersionInfo().version}`,
+      },
+    },
+    {
+      timeoutMs: 12000,
+      proxySettings: getSystemSettings(),
+      allowDirectFallback: true,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`GitHub release check failed: HTTP ${response.status}.`);
+  }
+
+  const release = await response.json();
+  return sanitizeGitHubRelease(release);
+}
+
+async function checkLatestVersion(options = {}) {
+  const force = Boolean(options.force);
+  const now = Date.now();
+  if (
+    !force &&
+    versionCheckCache?.checkedAtMs &&
+    now - versionCheckCache.checkedAtMs < VERSION_CHECK_CACHE_MS
+  ) {
+    return versionCheckCache.payload;
+  }
+
+  const current = currentAppVersionInfo({ includeOutput: false });
+  try {
+    const latest = await fetchLatestGitHubRelease(options);
+    const isNewer = compareVersions(latest.version, current.version) > 0;
+    const payload = {
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      current,
+      latest,
+      isNewer,
+      updateEnabled: current.updateEnabled,
+      updateRunning: current.updateRunning,
+      error: '',
+    };
+    versionCheckCache = {
+      checkedAtMs: now,
+      payload,
+    };
+    return payload;
+  } catch (error) {
+    const payload = {
+      ok: false,
+      checkedAt: new Date().toISOString(),
+      current,
+      latest: null,
+      isNewer: false,
+      updateEnabled: current.updateEnabled,
+      updateRunning: current.updateRunning,
+      error: String(error.message || error),
+    };
+    versionCheckCache = {
+      checkedAtMs: now,
+      payload,
+    };
+    return payload;
+  }
+}
+
+function compactCommandOutput(value = '') {
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .slice(-80)
+    .join('\n')
+    .slice(-8000);
+}
+
+function runConfiguredUpdateCommand() {
+  if (!VERSION_UPDATE_COMMAND) {
+    throw new Error('当前未配置 MAILUNION_UPDATE_COMMAND，系统不会默认执行自动更新命令。');
+  }
+
+  if (appUpdateState.running) {
+    throw new Error('更新任务正在执行中，请等待当前任务完成。');
+  }
+
+  appUpdateState = {
+    running: true,
+    startedAt: new Date().toISOString(),
+    finishedAt: '',
+    exitCode: null,
+    error: '',
+    output: '',
+  };
+
+  const child = exec(
+    VERSION_UPDATE_COMMAND,
+    {
+      cwd: process.cwd(),
+      windowsHide: true,
+      timeout: Math.max(Number(process.env.MAILUNION_UPDATE_TIMEOUT_MS || 10 * 60 * 1000), 30000),
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        MAILUNION_CURRENT_VERSION: currentAppVersionInfo({ includeOutput: false }).tag,
+      },
+    },
+    (error, stdout = '', stderr = '') => {
+      const output = compactCommandOutput([stdout, stderr].filter(Boolean).join('\n'));
+      appUpdateState = {
+        running: false,
+        startedAt: appUpdateState.startedAt,
+        finishedAt: new Date().toISOString(),
+        exitCode: Number(error?.code ?? 0),
+        error: error ? String(error.message || error) : '',
+        output,
+      };
+      versionCheckCache = null;
+    },
+  );
+
+  child.stdout?.on('data', (chunk) => {
+    appUpdateState.output = compactCommandOutput(`${appUpdateState.output}\n${chunk}`);
+  });
+  child.stderr?.on('data', (chunk) => {
+    appUpdateState.output = compactCommandOutput(`${appUpdateState.output}\n${chunk}`);
+  });
+
+  return appUpdateState;
 }
 
 function clampSyncIntervalSeconds(value, fallback = MIN_SYNC_INTERVAL_SECONDS) {
@@ -4829,6 +5093,14 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/version') {
+    sendJson(response, 200, {
+      ok: true,
+      current: currentAppVersionInfo({ includeOutput: false }),
+    });
+    return;
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/system-settings') {
     const auth = await getAuthContext(request);
     const systemSettings = await ensureSystemBrandAsset(getSystemSettings());
@@ -4865,6 +5137,42 @@ async function handleApi(request, response, url) {
 
   const auth = await requireAuth(request, response);
   if (!auth) {
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/version/check') {
+    const force = url.searchParams.get('force') === '1';
+    sendJson(
+      response,
+      200,
+      await checkLatestVersion({
+        force,
+        includeUpdateOutput: auth.user?.role === 'admin',
+      }),
+    );
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/version/update') {
+    if (!requireAdmin(auth, response)) {
+      return;
+    }
+
+    try {
+      runConfiguredUpdateCommand();
+      sendJson(response, 202, {
+        ok: true,
+        updateEnabled: true,
+        updateState: safeUpdateState({ includeOutput: true }),
+        message: '更新命令已开始执行，完成后请按部署方式重启或等待命令自动重启服务。',
+      });
+    } catch (error) {
+      sendJson(response, 400, {
+        error: String(error.message || error),
+        updateEnabled: Boolean(VERSION_UPDATE_COMMAND),
+        updateState: safeUpdateState({ includeOutput: true }),
+      });
+    }
     return;
   }
 

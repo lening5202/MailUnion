@@ -154,6 +154,11 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
 fi
 
 set_env_value "${INSTALL_DIR}/.env" "PORT" "${PORT}"
+set_env_value "${INSTALL_DIR}/.env" "MAILUNION_REPO_OWNER" "${REPO%%/*}"
+set_env_value "${INSTALL_DIR}/.env" "MAILUNION_REPO_NAME" "${REPO#*/}"
+if ! grep -qE '^MAILUNION_UPDATE_COMMAND=' "${INSTALL_DIR}/.env"; then
+  set_env_value "${INSTALL_DIR}/.env" "MAILUNION_UPDATE_COMMAND" ""
+fi
 if grep -qE '^APP_SECRET=(change-this-before-production)?\s*$' "${INSTALL_DIR}/.env"; then
   set_env_value "${INSTALL_DIR}/.env" "APP_SECRET" "$(new_secret)"
 fi

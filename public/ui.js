@@ -316,6 +316,126 @@ function renderOriginalMessageHtml(message = {}, options = {}) {
   `;
 }
 
+function formatVersionTag(value = '') {
+  const normalized = String(value || '').trim().replace(/^v+/i, '');
+  return normalized ? `v${normalized}` : 'v0.0.0';
+}
+
+function formatVersionCheckedAt(value = '') {
+  if (!value) {
+    return '尚未检查';
+  }
+
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
+  } catch (_) {
+    return value;
+  }
+}
+
+function renderAppVersionWidget(state = {}) {
+  const versionState = state.appVersion || {};
+  const current = versionState.current || {};
+  const latest = versionState.latest || {};
+  const currentTag = current.tag || formatVersionTag(current.version || '0.1.0');
+  const latestTag = latest.tag || '';
+  const isNewer = Boolean(versionState.isNewer);
+  const checking = Boolean(state.appVersionCheckLoading);
+  const updating = Boolean(state.appVersionUpdateLoading || versionState.updateRunning);
+  const releaseUrl =
+    (isNewer ? latest.url : current.releaseUrl)
+    || latest.url
+    || current.latestReleaseUrl
+    || current.repositoryUrl
+    || 'https://github.com/lening5202/MailUnion/releases/latest';
+  const repositoryUrl = current.repositoryUrl || 'https://github.com/lening5202/MailUnion';
+  const popover = state.appVersionPopoverOpen
+    ? `
+      <div class="version-popover">
+        <div class="version-popover-head">
+          <div>
+            <span class="version-popover-kicker">系统版本</span>
+            <strong>${escapeHtml(currentTag)}</strong>
+          </div>
+          <span class="version-status-pill ${isNewer ? 'has-update' : ''}">
+            ${escapeHtml(isNewer ? '发现新版本' : versionState.error ? '检查失败' : '已安装')}
+          </span>
+        </div>
+        <div class="version-popover-body">
+          <div class="version-row">
+            <span>当前版本</span>
+            <strong>${escapeHtml(currentTag)}</strong>
+          </div>
+          <div class="version-row">
+            <span>GitHub 最新</span>
+            <strong>${escapeHtml(checking ? '检查中...' : latestTag || (versionState.error ? '获取失败' : '待检查'))}</strong>
+          </div>
+          <div class="version-row">
+            <span>检查时间</span>
+            <strong>${escapeHtml(formatVersionCheckedAt(versionState.checkedAt))}</strong>
+          </div>
+        </div>
+        ${
+          versionState.error
+            ? `<div class="version-popover-notice">${escapeHtml(versionState.error)}</div>`
+            : isNewer
+              ? `<div class="version-popover-notice is-update">新版本 ${escapeHtml(latestTag)} 已发布，可以打开 GitHub Release 查看更新内容。</div>`
+              : '<div class="version-popover-notice is-ok">当前版本没有检测到可用更新。</div>'
+        }
+        ${
+          versionState.updateEnabled
+            ? `
+              <div class="version-popover-notice is-safe">
+                后台已配置更新命令，管理员可在这里触发更新并按命令完成重启。
+              </div>
+            `
+            : `
+              <div class="version-popover-notice">
+                一键更新默认关闭。需要在服务器配置 <code>MAILUNION_UPDATE_COMMAND</code> 后才会启用。
+              </div>
+            `
+        }
+        <div class="version-popover-actions">
+          <button class="tiny-button" type="button" data-action="check-app-version">${escapeHtml(checking ? '检查中...' : '刷新检查')}</button>
+          <a class="tiny-button" href="${escapeHtmlAttribute(releaseUrl)}" target="_blank" rel="noreferrer noopener">查看 Release</a>
+          <a class="tiny-button" href="${escapeHtmlAttribute(repositoryUrl)}" target="_blank" rel="noreferrer noopener">GitHub</a>
+          ${
+            state.user?.role === 'admin'
+              ? `<button class="tiny-button ${versionState.updateEnabled ? '' : 'is-disabled'}" type="button" data-action="start-app-update" ${versionState.updateEnabled && !updating ? '' : 'disabled'}>${escapeHtml(updating ? '更新中...' : '更新并重启')}</button>`
+              : ''
+          }
+        </div>
+        ${
+          versionState.updateState?.output
+            ? `<pre class="version-update-output">${escapeHtml(versionState.updateState.output)}</pre>`
+            : ''
+        }
+      </div>
+    `
+    : '';
+
+  return `
+    <div class="version-widget ${isNewer ? 'has-update' : ''} ${state.appVersionPopoverOpen ? 'is-open' : ''}" data-version-widget>
+      <button
+        class="version-badge"
+        type="button"
+        data-action="toggle-app-version-popover"
+        title="${escapeHtmlAttribute(isNewer ? `发现新版本 ${latestTag}` : `当前版本 ${currentTag}`)}"
+        aria-expanded="${state.appVersionPopoverOpen ? 'true' : 'false'}"
+      >
+        <span class="version-badge-dot" aria-hidden="true"></span>
+        <span class="version-badge-label">${escapeHtml(currentTag)}</span>
+      </button>
+      ${popover}
+    </div>
+  `;
+}
+
 export function formatDate(value) {
   if (!value) {
     return '未同步';
@@ -11742,6 +11862,7 @@ export function render(root, state) {
               ${sidebarBrandMark}
               <div class="brand-copy">
                 <h1>${escapeHtml(siteName)}</h1>
+                ${renderAppVersionWidget(state)}
               </div>
             </div>
           </div>
