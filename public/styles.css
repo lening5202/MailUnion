@@ -4602,13 +4602,11 @@ input[type='number'] {
 }
 
 .version-popover {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  z-index: 80;
-  width: 330px;
-  max-width: min(330px, calc(100vw - 42px));
+  width: min(360px, calc(100vw - 28px));
+  max-width: 100%;
+  max-height: calc(100vh - 36px);
   padding: 14px;
+  overflow: auto;
   border-radius: 20px;
   border: 1px solid var(--line);
   color: var(--text);
@@ -4619,17 +4617,19 @@ input[type='number'] {
   backdrop-filter: blur(24px) saturate(160%);
 }
 
-.version-popover::before {
-  content: '';
-  position: absolute;
-  top: -7px;
-  left: 28px;
-  width: 14px;
-  height: 14px;
-  border-left: 1px solid var(--line);
-  border-top: 1px solid var(--line);
-  background: var(--surface-panel);
-  transform: rotate(45deg);
+.version-popover-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(18px, calc(env(safe-area-inset-top, 0px) + 14px)) 16px 16px;
+  pointer-events: none;
+}
+
+.version-popover-shell .version-popover {
+  pointer-events: auto;
 }
 
 .version-popover-head,
@@ -5000,10 +5000,6 @@ input[type='number'] {
 .app-shell.sidebar-collapsed .nav-item-label,
 .app-shell.sidebar-collapsed .sidebar-utility-label,
 .app-shell.sidebar-collapsed .sidebar-account-copy {
-  display: none;
-}
-
-.app-shell.sidebar-collapsed .version-popover {
   display: none;
 }
 
@@ -10305,16 +10301,12 @@ body.mailbox-dragging {
   }
 
   .version-popover {
-    position: fixed;
-    top: 82px;
-    left: 16px;
-    right: 16px;
     width: auto;
     max-width: none;
   }
 
-  .version-popover::before {
-    display: none;
+  .version-popover-shell {
+    padding: max(12px, calc(env(safe-area-inset-top, 0px) + 10px)) 12px 12px;
   }
 
   .compact-field,

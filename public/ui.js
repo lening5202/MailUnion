@@ -354,8 +354,45 @@ function renderAppVersionWidget(state = {}) {
     || current.repositoryUrl
     || 'https://github.com/lening5202/MailUnion/releases/latest';
   const repositoryUrl = current.repositoryUrl || 'https://github.com/lening5202/MailUnion';
-  const popover = state.appVersionPopoverOpen
-    ? `
+  return `
+    <div class="version-widget ${isNewer ? 'has-update' : ''} ${state.appVersionPopoverOpen ? 'is-open' : ''}" data-version-widget>
+      <button
+        class="version-badge"
+        type="button"
+        data-action="toggle-app-version-popover"
+        title="${escapeHtmlAttribute(isNewer ? `发现新版本 ${latestTag}` : `当前版本 ${currentTag}`)}"
+        aria-expanded="${state.appVersionPopoverOpen ? 'true' : 'false'}"
+      >
+        <span class="version-badge-dot" aria-hidden="true"></span>
+        <span class="version-badge-label">${escapeHtml(currentTag)}</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderAppVersionPopover(state = {}) {
+  if (!state.appVersionPopoverOpen) {
+    return '';
+  }
+
+  const versionState = state.appVersion || {};
+  const current = versionState.current || {};
+  const latest = versionState.latest || {};
+  const currentTag = current.tag || formatVersionTag(current.version || '0.1.0');
+  const latestTag = latest.tag || '';
+  const isNewer = Boolean(versionState.isNewer);
+  const checking = Boolean(state.appVersionCheckLoading);
+  const updating = Boolean(state.appVersionUpdateLoading || versionState.updateRunning);
+  const releaseUrl =
+    (isNewer ? latest.url : current.releaseUrl)
+    || latest.url
+    || current.latestReleaseUrl
+    || current.repositoryUrl
+    || 'https://github.com/lening5202/MailUnion/releases/latest';
+  const repositoryUrl = current.repositoryUrl || 'https://github.com/lening5202/MailUnion';
+
+  return `
+    <div class="version-popover-shell" data-version-widget>
       <div class="version-popover">
         <div class="version-popover-head">
           <div>
@@ -416,22 +453,6 @@ function renderAppVersionWidget(state = {}) {
             : ''
         }
       </div>
-    `
-    : '';
-
-  return `
-    <div class="version-widget ${isNewer ? 'has-update' : ''} ${state.appVersionPopoverOpen ? 'is-open' : ''}" data-version-widget>
-      <button
-        class="version-badge"
-        type="button"
-        data-action="toggle-app-version-popover"
-        title="${escapeHtmlAttribute(isNewer ? `发现新版本 ${latestTag}` : `当前版本 ${currentTag}`)}"
-        aria-expanded="${state.appVersionPopoverOpen ? 'true' : 'false'}"
-      >
-        <span class="version-badge-dot" aria-hidden="true"></span>
-        <span class="version-badge-label">${escapeHtml(currentTag)}</span>
-      </button>
-      ${popover}
     </div>
   `;
 }
@@ -11852,6 +11873,7 @@ export function render(root, state) {
   `;
   const attachmentPreviewMarkup = renderAttachmentPreviewModal(state);
   const confirmDialogMarkup = renderConfirmDialog(state);
+  const versionPopoverMarkup = renderAppVersionPopover(state);
 
   root.innerHTML = `
     <div class="app-shell ${collapsed ? 'sidebar-collapsed' : ''}">
@@ -11912,6 +11934,7 @@ export function render(root, state) {
         ${currentView}
       </main>
     </div>
+    ${versionPopoverMarkup}
     ${attachmentPreviewMarkup}
     ${confirmDialogMarkup}
   `;
