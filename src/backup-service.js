@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const zlib = require('node:zlib');
 const archiver = require('archiver');
 const {
   checkpointDatabase,
@@ -310,6 +311,118 @@ function inspectExtractedBackup(extractRoot = '') {
   };
 }
 
+function readUInt16LE(buffer, offset) {
+  return buffer.readUInt16LE(offset);
+}
+
+function readUInt32LE(buffer, offset) {
+  return buffer.readUInt32LE(offset);
+}
+
+function normalizeZipEntryName(value = '') {
+  return String(value || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter((part) => part && part !== '.' && part !== '..')
+    .join('/');
+}
+
+function ensureExtractPathInsideRoot(rootPath = '', entryName = '') {
+  const normalizedEntryName = normalizeZipEntryName(entryName);
+  if (!normalizedEntryName) {
+    return '';
+  }
+
+  const resolvedRoot = path.resolve(rootPath);
+  const targetPath = path.resolve(resolvedRoot, normalizedEntryName);
+  if (targetPath !== resolvedRoot && !targetPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error(`ZIP entry is outside restore workspace: ${entryName}`);
+  }
+
+  return targetPath;
+}
+
+function findZipEndOfCentralDirectory(buffer) {
+  const signature = 0x06054b50;
+  const minOffset = Math.max(0, buffer.length - 65557);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === signature) {
+      return offset;
+    }
+  }
+
+  return -1;
+}
+
+function extractZipWithNode(archivePath, extractRoot) {
+  const archiveBuffer = fs.readFileSync(archivePath);
+  const eocdOffset = findZipEndOfCentralDirectory(archiveBuffer);
+  if (eocdOffset < 0) {
+    throw new Error('This file is not a valid ZIP archive.');
+  }
+
+  const entryCount = readUInt16LE(archiveBuffer, eocdOffset + 10);
+  const centralDirectoryOffset = readUInt32LE(archiveBuffer, eocdOffset + 16);
+  let cursor = centralDirectoryOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (readUInt32LE(archiveBuffer, cursor) !== 0x02014b50) {
+      throw new Error('ZIP central directory is invalid.');
+    }
+
+    const compressionMethod = readUInt16LE(archiveBuffer, cursor + 10);
+    const compressedSize = readUInt32LE(archiveBuffer, cursor + 20);
+    const fileNameLength = readUInt16LE(archiveBuffer, cursor + 28);
+    const extraFieldLength = readUInt16LE(archiveBuffer, cursor + 30);
+    const fileCommentLength = readUInt16LE(archiveBuffer, cursor + 32);
+    const externalAttributes = readUInt32LE(archiveBuffer, cursor + 38);
+    const localHeaderOffset = readUInt32LE(archiveBuffer, cursor + 42);
+    const fileName = archiveBuffer
+      .subarray(cursor + 46, cursor + 46 + fileNameLength)
+      .toString('utf8');
+    const normalizedFileName = normalizeZipEntryName(fileName);
+    const isDirectory =
+      fileName.endsWith('/') ||
+      fileName.endsWith('\\') ||
+      ((externalAttributes >>> 16) & 0o040000) === 0o040000;
+
+    cursor += 46 + fileNameLength + extraFieldLength + fileCommentLength;
+
+    if (!normalizedFileName) {
+      continue;
+    }
+
+    const targetPath = ensureExtractPathInsideRoot(extractRoot, normalizedFileName);
+    if (isDirectory) {
+      fs.mkdirSync(targetPath, { recursive: true });
+      continue;
+    }
+
+    if (readUInt32LE(archiveBuffer, localHeaderOffset) !== 0x04034b50) {
+      throw new Error(`ZIP local header is invalid: ${normalizedFileName}`);
+    }
+
+    const localFileNameLength = readUInt16LE(archiveBuffer, localHeaderOffset + 26);
+    const localExtraFieldLength = readUInt16LE(archiveBuffer, localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
+    const dataEnd = dataStart + compressedSize;
+    const compressedData = archiveBuffer.subarray(dataStart, dataEnd);
+    let fileBuffer;
+
+    if (compressionMethod === 0) {
+      fileBuffer = compressedData;
+    } else if (compressionMethod === 8) {
+      fileBuffer = zlib.inflateRawSync(compressedData);
+    } else {
+      throw new Error(`Unsupported ZIP compression method ${compressionMethod}: ${normalizedFileName}`);
+    }
+
+    ensureParentDirectory(targetPath);
+    fs.writeFileSync(targetPath, fileBuffer);
+  }
+}
+
 function runExtractionAttempt(command, args) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -329,6 +442,54 @@ function runExtractionAttempt(command, args) {
 
 function extractArchive(archivePath, extractRoot) {
   resetDirectory(extractRoot);
+
+  try {
+    extractZipWithNode(archivePath, extractRoot);
+    return;
+  } catch (error) {
+    const nodeZipError = `node-zip: ${String(error.message || error)}`;
+    const attempts = process.platform === 'win32'
+      ? [
+          {
+            command: 'powershell.exe',
+            args: [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              'param([string]$zip,[string]$dest) Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force',
+              archivePath,
+              extractRoot,
+            ],
+          },
+          {
+            command: 'tar.exe',
+            args: ['-xf', archivePath, '-C', extractRoot],
+          },
+        ]
+      : [
+          {
+            command: 'unzip',
+            args: ['-oq', archivePath, '-d', extractRoot],
+          },
+          {
+            command: 'tar',
+            args: ['-xf', archivePath, '-C', extractRoot],
+          },
+        ];
+
+    const errors = [nodeZipError];
+    for (const attempt of attempts) {
+      try {
+        resetDirectory(extractRoot);
+        runExtractionAttempt(attempt.command, attempt.args);
+        return;
+      } catch (attemptError) {
+        errors.push(`${attempt.command}: ${String(attemptError.message || attemptError)}`);
+      }
+    }
+
+    throw new Error(`备份压缩包解压失败：${errors.join(' | ')}`);
+  }
 
   const attempts = process.platform === 'win32'
     ? [
