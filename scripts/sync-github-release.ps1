@@ -58,6 +58,8 @@ $excludedRootItems = @(
   '.tmp-edge-profile'
 )
 $excludedFiles = @(
+  '.env.*',
+  '*.bak',
   '*.log',
   'server.pid',
   'server.stdout.log',
@@ -68,6 +70,11 @@ $excludedFiles = @(
 
 Get-ChildItem -LiteralPath $ProjectRoot -Force | ForEach-Object {
   if ($excludedRootItems -contains $_.Name) {
+    return
+  }
+
+  if ($_.Name -eq '.env.example') {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $resolvedGithubRoot $_.Name) -Recurse -Force
     return
   }
 

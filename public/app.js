@@ -1302,6 +1302,9 @@ const state = {
     checkedAt: '',
     isNewer: false,
     error: '',
+    warning: '',
+    releaseUnavailable: false,
+    buildType: 'source',
     updateEnabled: false,
     updateRunning: false,
     updateState: null,
@@ -4190,6 +4193,9 @@ function applyVersionPayload(payload = {}) {
     checkedAt: payload.checkedAt || state.appVersion.checkedAt || '',
     isNewer: Boolean(payload.isNewer),
     error: String(payload.error || ''),
+    warning: String(payload.warning || ''),
+    releaseUnavailable: Boolean(payload.releaseUnavailable || latest?.unavailable),
+    buildType: String(payload.buildType || current?.buildType || state.appVersion.buildType || 'source'),
     updateEnabled: Boolean(payload.updateEnabled ?? current?.updateEnabled ?? state.appVersion.updateEnabled),
     updateRunning: Boolean(payload.updateRunning ?? current?.updateRunning ?? updateState?.running),
     updateState,
@@ -4217,7 +4223,9 @@ async function checkAppVersion(options = {}) {
           ? `发现新版本 ${state.appVersion.latest?.tag || ''}，可以查看 GitHub Release。`
           : state.appVersion.error
             ? `版本检查失败：${state.appVersion.error}`
-            : '当前已经是最新版本。',
+            : state.appVersion.releaseUnavailable
+              ? 'GitHub 仓库暂未发布 Release，当前版本信息已正常读取。'
+              : '当前已经是最新版本。',
         tone: state.appVersion.error ? 'error' : state.appVersion.isNewer ? 'info' : 'success',
       };
     }

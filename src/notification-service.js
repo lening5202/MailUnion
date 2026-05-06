@@ -130,24 +130,43 @@ const DEFAULT_TEMPLATE_OPTIONS = Object.freeze({
 
 const MARKETING_KEYWORDS = [
   'unsubscribe',
+  'unsubscribe from',
+  'email preferences',
+  'manage preferences',
+  'view in browser',
+  'view online',
   'promotion',
   'promo',
   'marketing',
   'campaign',
   'sale',
+  'flash sale',
   'discount',
   'coupon',
+  'voucher',
+  'deal',
+  'deals',
   'offer',
+  'special offer',
+  'exclusive offer',
   'limited-time',
+  'limited time',
   'pricing',
   'upgrade',
   'try pro',
   'more usage',
   '退订',
+  '取消订阅',
+  '邮件偏好',
+  '在浏览器中查看',
   '营销',
   '促销',
   '优惠',
   '折扣',
+  '特价',
+  '秒杀',
+  '大促',
+  '满减',
   '活动',
   '限时',
   '升级套餐',
@@ -156,8 +175,18 @@ const MARKETING_KEYWORDS = [
 const ORDER_KEYWORDS = [
   'order',
   'ordered',
+  'order confirmed',
+  'order confirmation',
+  'order update',
+  'order status',
+  'order number',
+  'order no',
+  'order id',
   'purchase',
   'purchased',
+  'payment received',
+  'payment successful',
+  'payment confirmation',
   'shipment',
   'shipping',
   'shipped',
@@ -167,9 +196,18 @@ const ORDER_KEYWORDS = [
   'track package',
   'invoice',
   'receipt',
+  'tax invoice',
+  'booking',
+  'reservation',
+  'ticket',
   '订单',
   '订单号',
   '订单编号',
+  '订单确认',
+  '订单通知',
+  '订单状态',
+  '订单更新',
+  '订单详情',
   '下单',
   '已下单',
   '发货',
@@ -181,8 +219,17 @@ const ORDER_KEYWORDS = [
   '签收',
   '交易',
   '购买',
+  '付款',
+  '支付',
   '支付成功',
   '付款成功',
+  '收据',
+  '发票',
+  '票据',
+  '预订',
+  '预约',
+  '订票',
+  '门票',
   '订单已生成',
 ];
 
@@ -191,23 +238,43 @@ const SUBSCRIPTION_KEYWORDS = [
   'subscribe',
   'subscribed',
   'subscriber',
+  'subscription renewed',
+  'subscription renewal',
+  'subscription update',
+  'subscription reminder',
+  'subscription expiring',
+  'subscription expired',
   'membership',
   'member',
+  'premium',
   'renewal',
   'renew',
   'renewed',
+  'auto renew',
+  'auto-renew',
   'billing cycle',
+  'billing period',
   'plan',
+  'plan changed',
   'trial',
+  'free trial',
+  'trial ending',
   'newsletter',
   'digest',
+  'weekly digest',
+  'monthly digest',
   '订阅',
   '订阅通知',
   '订阅提醒',
   '订阅成功',
   '订阅更新',
+  '订阅续费',
+  '订阅即将到期',
+  '订阅已到期',
   '会员',
   '会员服务',
+  '会员到期',
+  '会员续费',
   '续费',
   '自动续费',
   '到期',
@@ -222,14 +289,38 @@ const SUBSCRIPTION_KEYWORDS = [
 const JUNK_KEYWORDS = [
   'spam',
   'phishing',
+  'scam',
+  'fraud',
+  'malware',
+  'virus',
   'lottery',
+  'winner',
+  'you won',
+  'claim prize',
+  'free money',
+  'investment opportunity',
+  'guaranteed income',
+  'urgent action required',
   'casino',
+  'betting',
+  'loan offer',
   '博彩',
   '中奖',
+  '大奖',
+  '领奖',
+  '领取奖金',
+  '钓鱼',
+  '诈骗',
+  '病毒',
+  '木马',
   '低息贷款',
+  '贷款秒批',
   '免费领取',
   '兼职刷单',
+  '刷单',
+  '高薪兼职',
   '成人',
+  '色情',
   '垃圾邮件',
 ];
 
@@ -1128,51 +1219,122 @@ function scoreNotificationCategoryKeywords(text = '', keywords = [], weight = 1)
   }, 0);
 }
 
+function categoryTextBundle(message = {}, body = '') {
+  const subject = normalizeCategoryMatchText(message.subject);
+  const from = normalizeCategoryMatchText([message.fromName, message.fromAddress].filter(Boolean).join(' '));
+  const preview = normalizeCategoryMatchText(message.preview);
+  const textBody = normalizeCategoryMatchText(message.textBody);
+  const htmlBody = normalizeCategoryMatchText(htmlBodyToText(message.htmlBody || ''));
+  const bodyText = normalizeCategoryMatchText(body);
+  const all = [subject, from, preview, bodyText, textBody, htmlBody]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    all,
+    bodyText,
+    from,
+    htmlBody,
+    preview,
+    subject,
+    textBody,
+  };
+}
+
+function scoreNotificationCategory(texts = {}, keywords = [], weights = {}) {
+  return scoreNotificationCategoryKeywords(texts.subject, keywords, weights.subject ?? 5)
+    + scoreNotificationCategoryKeywords(texts.from, keywords, weights.from ?? 2)
+    + scoreNotificationCategoryKeywords(texts.preview, keywords, weights.preview ?? 3)
+    + scoreNotificationCategoryKeywords(texts.bodyText, keywords, weights.body ?? 1)
+    + scoreNotificationCategoryKeywords(texts.textBody, keywords, weights.textBody ?? 1)
+    + scoreNotificationCategoryKeywords(texts.htmlBody, keywords, weights.htmlBody ?? 0.6);
+}
+
 function resolveNotificationMessageCategory(message = {}, body = '', verification = null) {
-  if (verification) {
+  const texts = categoryTextBundle(message, body);
+  if (verification || containsVerificationKeyword(`${texts.subject}\n${texts.preview}\n${texts.bodyText}`)) {
     return 'verification';
   }
 
-  const subject = normalizeCategoryMatchText(message.subject);
-  const from = normalizeCategoryMatchText([message.fromName, message.fromAddress].filter(Boolean).join(' '));
-  const bodyText = normalizeCategoryMatchText(body);
   const scores = {
-    order: scoreNotificationCategoryKeywords(subject, ORDER_KEYWORDS, 4)
-      + scoreNotificationCategoryKeywords(from, ORDER_KEYWORDS, 2)
-      + scoreNotificationCategoryKeywords(bodyText, ORDER_KEYWORDS, 1),
-    subscription: scoreNotificationCategoryKeywords(subject, SUBSCRIPTION_KEYWORDS, 4)
-      + scoreNotificationCategoryKeywords(from, SUBSCRIPTION_KEYWORDS, 2)
-      + scoreNotificationCategoryKeywords(bodyText, SUBSCRIPTION_KEYWORDS, 1),
-    marketing: scoreNotificationCategoryKeywords(subject, MARKETING_KEYWORDS, 4)
-      + scoreNotificationCategoryKeywords(from, MARKETING_KEYWORDS, 2)
-      + scoreNotificationCategoryKeywords(bodyText, MARKETING_KEYWORDS, 1),
-    junk: scoreNotificationCategoryKeywords(subject, JUNK_KEYWORDS, 5)
-      + scoreNotificationCategoryKeywords(from, JUNK_KEYWORDS, 3)
-      + scoreNotificationCategoryKeywords(bodyText, JUNK_KEYWORDS, 1),
+    order: scoreNotificationCategory(texts, ORDER_KEYWORDS, {
+      subject: 6,
+      preview: 4,
+      body: 1.3,
+      textBody: 1,
+      htmlBody: 0.7,
+    }),
+    subscription: scoreNotificationCategory(texts, SUBSCRIPTION_KEYWORDS, {
+      subject: 6,
+      preview: 4,
+      body: 1.2,
+      textBody: 1,
+      htmlBody: 0.7,
+    }),
+    marketing: scoreNotificationCategory(texts, MARKETING_KEYWORDS, {
+      subject: 4,
+      from: 2,
+      preview: 2,
+      body: 0.8,
+      textBody: 0.7,
+      htmlBody: 0.5,
+    }),
+    junk: scoreNotificationCategory(texts, JUNK_KEYWORDS, {
+      subject: 7,
+      from: 3,
+      preview: 4,
+      body: 1,
+      textBody: 1,
+      htmlBody: 0.6,
+    }),
   };
 
   if (detectJunkMessage(message, body)) {
-    scores.junk += 6;
+    scores.junk += 7;
   }
   if (detectMarketingMessage(message, body)) {
-    scores.marketing += 3;
+    scores.marketing += 4;
   }
-  if (/(订单号|订单编号|order\s*(?:id|number|no\.?))/iu.test(`${subject}\n${bodyText}`)) {
-    scores.order += 5;
+  if (/(订单号|订单编号|订单确认|order\s*(?:id|number|no\.?)|order confirmation|order confirmed|receipt|invoice|收据|发票)/iu.test(texts.all)) {
+    scores.order += 7;
   }
-  if (/(物流|运单|tracking|shipment|delivery|发货|已发货|配送|签收)/iu.test(`${subject}\n${bodyText}`)) {
-    scores.order += 3;
+  if (/(物流|运单|tracking|shipment|shipping|delivery|发货|已发货|配送|签收)/iu.test(texts.all)) {
+    scores.order += 4;
   }
-  if (/(订阅|subscription|newsletter|renewal|续费|会员|服务到期|billing cycle)/iu.test(`${subject}\n${bodyText}`)) {
-    scores.subscription += 4;
+  if (/(订阅|subscription|renewal|auto[- ]?renew|续费|会员|服务到期|billing cycle|trial ending|订阅即将到期|会员到期)/iu.test(texts.all)) {
+    scores.subscription += 6;
+  }
+  if (/(unsubscribe|退订|取消订阅|manage preferences|email preferences|view in browser|在浏览器中查看)/iu.test(texts.all)) {
+    scores.marketing += 4;
+  }
+  if (/(x-spam|spam score|phishing|scam|fraud|钓鱼|诈骗|垃圾邮件)/iu.test(texts.all)) {
+    scores.junk += 6;
   }
 
-  const priority = ['junk', 'order', 'subscription', 'marketing'];
-  const best = priority
+  const folderKind = String(message.folderKind || '').trim().toLowerCase();
+  if (folderKind === 'junk') {
+    return 'junk';
+  }
+
+  const candidates = ['order', 'subscription', 'junk', 'marketing']
     .map((category) => ({ category, score: scores[category] || 0 }))
-    .sort((a, b) => (b.score - a.score) || (priority.indexOf(a.category) - priority.indexOf(b.category)))[0];
+    .sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  const second = candidates[1];
+  if (!best || best.score < 4) {
+    return 'standard';
+  }
+  if (second && best.score - second.score < 2) {
+    return 'standard';
+  }
+  if (best.category === 'marketing' && best.score < 6) {
+    return 'standard';
+  }
+  if (best.category === 'junk' && best.score < 6) {
+    return 'standard';
+  }
 
-  return best && best.score >= 2 ? best.category : 'standard';
+  return best.category;
 }
 
 const NOTIFICATION_IMPORTANT_FACT_PATTERNS = Object.freeze({

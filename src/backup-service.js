@@ -22,7 +22,9 @@ const { STORAGE_ROOT } = require('./storage');
 const BACKUP_ROOT = path.join(process.cwd(), 'runtime', 'backups');
 const RESTORE_WORK_ROOT = path.join(process.cwd(), 'runtime', 'restore-workspaces');
 const BACKUP_TICK_MS = 60 * 1000;
+const STALE_RUNNING_BACKUP_MS = 30 * 60 * 1000;
 const ENV_FILE = path.join(process.cwd(), '.env');
+const FIXED_RUNTIME_PORT = '52080';
 const DATABASE_SIDE_FILES = [`${databaseFile}-wal`, `${databaseFile}-shm`];
 
 function ensureBackupRoot() {
@@ -186,6 +188,49 @@ function copyDirectoryContents(sourceDirectory = '', targetDirectory = '') {
     ensureParentDirectory(targetPath);
     fs.copyFileSync(sourcePath, targetPath);
   });
+}
+
+function readEnvPairs(filePath = '') {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return new Map();
+  }
+
+  const pairs = new Map();
+  String(fs.readFileSync(filePath, 'utf8') || '')
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const normalizedLine = line.replace(/^\uFEFF/, '').trim();
+      if (!normalizedLine || normalizedLine.startsWith('#')) {
+        return;
+      }
+
+      const match = normalizedLine.match(/^([^#=\s]+)\s*=\s*(.*)$/);
+      if (match) {
+        pairs.set(match[1], match[2]);
+      }
+    });
+
+  return pairs;
+}
+
+function serializeEnvPairs(pairs = new Map()) {
+  return `${Array.from(pairs.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n')}\n`;
+}
+
+function mergeRestoredEnvFile(sourcePath = '', targetPath = '', options = {}) {
+  const restoredPairs = readEnvPairs(sourcePath);
+  const currentPairs = options.currentPairs instanceof Map ? options.currentPairs : readEnvPairs(targetPath);
+  const mergedPairs = new Map(restoredPairs);
+
+  mergedPairs.set('PORT', FIXED_RUNTIME_PORT);
+  if (!options.restoreDatabase && currentPairs.has('APP_SECRET')) {
+    mergedPairs.set('APP_SECRET', currentPairs.get('APP_SECRET'));
+  }
+
+  ensureParentDirectory(targetPath);
+  fs.writeFileSync(targetPath, serializeEnvPairs(mergedPairs), 'utf8');
 }
 
 function createArchive(archivePath, settings = {}) {
@@ -674,9 +719,11 @@ function applyRestoreActions(actions = [], workRoot = '') {
   const rollbackRoot = path.join(workRoot, 'rollback');
   fs.mkdirSync(rollbackRoot, { recursive: true });
   const rollbackEntries = [];
+  const restoreDatabase = actions.some((action) => action.key === 'database' && action.restore);
 
   try {
     actions.forEach((action, index) => {
+      const currentEnvPairs = action.key === 'envFile' ? readEnvPairs(action.targetPath) : null;
       if (fs.existsSync(action.targetPath)) {
         const rollbackPath = path.join(rollbackRoot, rollbackFileNameForAction(action, index));
         if (action.kind === 'directory') {
@@ -701,6 +748,11 @@ function applyRestoreActions(actions = [], workRoot = '') {
       if (action.kind === 'directory') {
         fs.mkdirSync(action.targetPath, { recursive: true });
         copyDirectoryContents(action.sourcePath, action.targetPath);
+        return;
+      }
+
+      if (action.key === 'envFile') {
+        mergeRestoredEnvFile(action.sourcePath, action.targetPath, { currentPairs: currentEnvPairs, restoreDatabase });
         return;
       }
 
@@ -747,6 +799,18 @@ function cleanupRollbackEntries(entries = []) {
   entries.forEach((entry) => {
     safeRemovePath(entry.rollbackPath);
   });
+}
+
+function backupRecordAgeMs(record = {}) {
+  const timestamp = Date.parse(record.updatedAt || record.createdAt || '');
+  return Number.isFinite(timestamp) ? Math.max(Date.now() - timestamp, 0) : Number.POSITIVE_INFINITY;
+}
+
+function isStaleRunningBackupRecord(record = {}) {
+  return (
+    String(record?.status || '').trim() === 'running'
+    && backupRecordAgeMs(record) >= STALE_RUNNING_BACKUP_MS
+  );
 }
 
 class BackupService {
@@ -803,6 +867,7 @@ class BackupService {
 
   start() {
     ensureBackupRoot();
+    this.markStaleRunningBackups();
     this.refreshSchedule();
   }
 
@@ -832,7 +897,10 @@ class BackupService {
       return;
     }
 
-    const latestRecord = listBackupRecords(1)[0];
+    this.markStaleRunningBackups();
+    const latestRecord =
+      listBackupRecords(20).find((item) => String(item.status || '').trim() === 'completed')
+      || listBackupRecords(1)[0];
     const intervalMs = normalizeIntervalHours(settings.backupIntervalHours, 24) * 60 * 60 * 1000;
     const lastRunAt = latestRecord?.createdAt ? Date.parse(latestRecord.createdAt) : 0;
 
@@ -1029,6 +1097,14 @@ class BackupService {
       return null;
     }
 
+    if (isStaleRunningBackupRecord(record)) {
+      updateBackupRecord(record.id, {
+        status: 'failed',
+        error: '备份任务异常中断，系统已自动标记为失败，可手动删除这条记录。',
+      });
+      record.status = 'failed';
+    }
+
     if (String(record.status || '').trim() === 'running') {
       throw new Error('当前备份正在执行，请稍后再删除。');
     }
@@ -1044,6 +1120,17 @@ class BackupService {
 
   getBackupRecord(id) {
     return getBackupRecordById(id);
+  }
+
+  markStaleRunningBackups() {
+    listBackupRecords(500)
+      .filter(isStaleRunningBackupRecord)
+      .forEach((record) => {
+        updateBackupRecord(record.id, {
+          status: 'failed',
+          error: '备份任务异常中断，系统已自动标记为失败，可手动删除这条记录。',
+        });
+      });
   }
 }
 

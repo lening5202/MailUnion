@@ -1,5 +1,5 @@
 ﻿export function escapeHtml(value) {
-  return String(value || '')
+  return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -345,15 +345,6 @@ function renderAppVersionWidget(state = {}) {
   const currentTag = current.tag || formatVersionTag(current.version || '0.1.0');
   const latestTag = latest.tag || '';
   const isNewer = Boolean(versionState.isNewer);
-  const checking = Boolean(state.appVersionCheckLoading);
-  const updating = Boolean(state.appVersionUpdateLoading || versionState.updateRunning);
-  const releaseUrl =
-    (isNewer ? latest.url : current.releaseUrl)
-    || latest.url
-    || current.latestReleaseUrl
-    || current.repositoryUrl
-    || 'https://github.com/lening5202/MailUnion/releases/latest';
-  const repositoryUrl = current.repositoryUrl || 'https://github.com/lening5202/MailUnion';
   return `
     <div class="version-widget ${isNewer ? 'has-update' : ''} ${state.appVersionPopoverOpen ? 'is-open' : ''}" data-version-widget>
       <button
@@ -363,8 +354,8 @@ function renderAppVersionWidget(state = {}) {
         title="${escapeHtmlAttribute(isNewer ? `发现新版本 ${latestTag}` : `当前版本 ${currentTag}`)}"
         aria-expanded="${state.appVersionPopoverOpen ? 'true' : 'false'}"
       >
-        <span class="version-badge-dot" aria-hidden="true"></span>
         <span class="version-badge-label">${escapeHtml(currentTag)}</span>
+        ${isNewer ? '<span class="version-badge-ping" aria-hidden="true"><span></span><i></i></span>' : ''}
       </button>
     </div>
   `;
@@ -383,73 +374,159 @@ function renderAppVersionPopover(state = {}) {
   const isNewer = Boolean(versionState.isNewer);
   const checking = Boolean(state.appVersionCheckLoading);
   const updating = Boolean(state.appVersionUpdateLoading || versionState.updateRunning);
+  const updateEnabled = Boolean(versionState.updateEnabled);
+  const isAdmin = state.user?.role === 'admin';
+  const releaseUnavailable = Boolean(versionState.releaseUnavailable || latest.unavailable);
+  const isSourceBuild = String(versionState.buildType || current.buildType || 'source') !== 'release';
+  const updateError = String(versionState.updateState?.error || '').trim();
+  const updateOutput = String(versionState.updateState?.output || '').trim();
   const releaseUrl =
-    (isNewer ? latest.url : current.releaseUrl)
+    (isNewer ? latest.url : '')
     || latest.url
-    || current.latestReleaseUrl
+    || current.releaseUrl
+    || current.releasesUrl
     || current.repositoryUrl
-    || 'https://github.com/lening5202/MailUnion/releases/latest';
+    || 'https://github.com/lening5202/MailUnion/releases';
   const repositoryUrl = current.repositoryUrl || 'https://github.com/lening5202/MailUnion';
+  const latestLine = checking
+    ? '正在检查 GitHub Release...'
+    : releaseUnavailable
+      ? 'GitHub 暂无 Release'
+      : isNewer
+        ? `最新版本：${latestTag}`
+        : versionState.error
+          ? '检查失败'
+          : '当前已是最新版本';
+  const centerIcon = !versionState.error && !isNewer && !releaseUnavailable && !checking
+    ? '<span class="version-center-check" aria-hidden="true">✓</span>'
+    : '';
+  const mainCard = (() => {
+    if (checking) {
+      return `
+        <div class="version-state-card is-loading">
+          <span class="version-state-icon version-spin">${SYSTEM_ICON_SVG.refresh}</span>
+          <div>
+            <strong>正在检查更新</strong>
+            <p>正在连接 GitHub Release，请稍候。</p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (updateError) {
+      return `
+        <div class="version-state-card is-error">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.warning}</span>
+          <div>
+            <strong>更新失败</strong>
+            <p>${escapeHtml(updateError)}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (versionState.error) {
+      return `
+        <div class="version-state-card is-error">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.warning}</span>
+          <div>
+            <strong>检查失败</strong>
+            <p>${escapeHtml(versionState.error)}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (releaseUnavailable) {
+      return `
+        <div class="version-state-card is-info">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.warning}</span>
+          <div>
+            <strong>GitHub 暂无 Release</strong>
+            <p>${escapeHtml(versionState.warning || '仓库还没有发布 Release，当前版本信息已正常读取。')}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (isNewer && isSourceBuild) {
+      return `
+        <a class="version-state-card is-update is-link" href="${escapeHtmlAttribute(releaseUrl)}" target="_blank" rel="noreferrer noopener">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.download || SYSTEM_ICON_SVG.sync}</span>
+          <div>
+            <strong>发现新版本</strong>
+            <p>${escapeHtml(latestTag)} 已发布，源码部署请在服务器手动拉取更新。</p>
+          </div>
+          <span class="version-state-arrow">›</span>
+        </a>
+        <div class="version-state-card is-info is-compact">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.warning}</span>
+          <div>
+            <strong>源码模式</strong>
+            <p>当前未启用后台一键更新命令，建议确认备份后再手动更新。</p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (isNewer) {
+      return `
+        <div class="version-state-card is-update">
+          <span class="version-state-icon">${SYSTEM_ICON_SVG.download || SYSTEM_ICON_SVG.sync}</span>
+          <div>
+            <strong>发现新版本</strong>
+            <p>${escapeHtml(latestTag)} 已发布，可以查看 Release 或执行更新。</p>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <a class="version-release-link" href="${escapeHtmlAttribute(releaseUrl)}" target="_blank" rel="noreferrer noopener">
+        <span class="version-release-github" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49 0-.24-.01-.88-.01-1.72-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.64-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.04A9.36 9.36 0 0 1 12 7c.85 0 1.7.12 2.5.34 1.91-1.32 2.75-1.04 2.75-1.04.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.59.69.49A10.08 10.08 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z"/></svg>
+        </span>
+        查看 Release
+      </a>
+    `;
+  })();
+  const updateButton = isAdmin && isNewer && !isSourceBuild
+    ? `<button class="version-update-button" type="button" data-action="start-app-update" ${updateEnabled && !updating ? '' : 'disabled'}>${updating ? '更新中...' : '立即更新'}</button>`
+    : '';
+  const releaseLink = isNewer && !isSourceBuild
+    ? `<a class="version-release-link is-small" href="${escapeHtmlAttribute(releaseUrl)}" target="_blank" rel="noreferrer noopener">查看更新日志</a>`
+    : '';
 
   return `
     <div class="version-popover-shell" data-version-widget>
       <div class="version-popover">
         <div class="version-popover-head">
-          <div>
-            <span class="version-popover-kicker">系统版本</span>
+          <span>当前版本</span>
+          <button
+            class="version-refresh-button ${checking ? 'is-loading' : ''}"
+            type="button"
+            data-action="check-app-version"
+            ${checking ? 'disabled' : ''}
+            title="${escapeHtmlAttribute(checking ? '检查中' : '刷新检查')}"
+          >
+            ${SYSTEM_ICON_SVG.refresh}
+          </button>
+        </div>
+        <div class="version-popover-current">
+          <div class="version-popover-current-line">
             <strong>${escapeHtml(currentTag)}</strong>
+            ${centerIcon}
           </div>
-          <span class="version-status-pill ${isNewer ? 'has-update' : ''}">
-            ${escapeHtml(isNewer ? '发现新版本' : versionState.error ? '检查失败' : '已安装')}
-          </span>
+          <p>${escapeHtml(latestLine)}</p>
+          <span>检查时间：${escapeHtml(formatVersionCheckedAt(versionState.checkedAt))}</span>
         </div>
-        <div class="version-popover-body">
-          <div class="version-row">
-            <span>当前版本</span>
-            <strong>${escapeHtml(currentTag)}</strong>
-          </div>
-          <div class="version-row">
-            <span>GitHub 最新</span>
-            <strong>${escapeHtml(checking ? '检查中...' : latestTag || (versionState.error ? '获取失败' : '待检查'))}</strong>
-          </div>
-          <div class="version-row">
-            <span>检查时间</span>
-            <strong>${escapeHtml(formatVersionCheckedAt(versionState.checkedAt))}</strong>
-          </div>
-        </div>
+        <div class="version-state-stack">${mainCard}</div>
+        ${updateButton}
+        ${releaseLink}
+        <a class="version-release-link is-small" href="${escapeHtmlAttribute(repositoryUrl)}" target="_blank" rel="noreferrer noopener">GitHub</a>
         ${
-          versionState.error
-            ? `<div class="version-popover-notice">${escapeHtml(versionState.error)}</div>`
-            : isNewer
-              ? `<div class="version-popover-notice is-update">新版本 ${escapeHtml(latestTag)} 已发布，可以打开 GitHub Release 查看更新内容。</div>`
-              : '<div class="version-popover-notice is-ok">当前版本没有检测到可用更新。</div>'
-        }
-        ${
-          versionState.updateEnabled
-            ? `
-              <div class="version-popover-notice is-safe">
-                后台已配置更新命令，管理员可在这里触发更新并按命令完成重启。
-              </div>
-            `
-            : `
-              <div class="version-popover-notice">
-                一键更新默认关闭。需要在服务器配置 <code>MAILUNION_UPDATE_COMMAND</code> 后才会启用。
-              </div>
-            `
-        }
-        <div class="version-popover-actions">
-          <button class="tiny-button" type="button" data-action="check-app-version">${escapeHtml(checking ? '检查中...' : '刷新检查')}</button>
-          <a class="tiny-button" href="${escapeHtmlAttribute(releaseUrl)}" target="_blank" rel="noreferrer noopener">查看 Release</a>
-          <a class="tiny-button" href="${escapeHtmlAttribute(repositoryUrl)}" target="_blank" rel="noreferrer noopener">GitHub</a>
-          ${
-            state.user?.role === 'admin'
-              ? `<button class="tiny-button ${versionState.updateEnabled ? '' : 'is-disabled'}" type="button" data-action="start-app-update" ${versionState.updateEnabled && !updating ? '' : 'disabled'}>${escapeHtml(updating ? '更新中...' : '更新并重启')}</button>`
-              : ''
-          }
-        </div>
-        ${
-          versionState.updateState?.output
-            ? `<pre class="version-update-output">${escapeHtml(versionState.updateState.output)}</pre>`
+          updateOutput
+            ? `<pre class="version-update-output">${escapeHtml(updateOutput)}</pre>`
             : ''
         }
       </div>
@@ -1895,6 +1972,8 @@ const SYSTEM_ICON_SVG = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v6h-6"/><path d="M4 20v-6h6"/><path d="M20 10a7.5 7.5 0 0 0-12.8-5.3L4 10"/><path d="M4 14a7.5 7.5 0 0 0 12.8 5.3L20 14"/></svg>',
   sync:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-5"/><path d="m17 4 3 3-3 3"/><path d="M4 17h5"/><path d="m7 14-3 3 3 3"/><path d="M6.8 9.5A7 7 0 0 1 18 7"/><path d="M17.2 14.5A7 7 0 0 1 6 17"/></svg>',
+  download:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 19h14"/></svg>',
   save:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h11l3 3V18a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18Z"/><path d="M8 5.5v5h7v-5"/><path d="M9 16h6"/></svg>',
   delete:
@@ -2497,20 +2576,32 @@ function backupStorageReadyLabel(backup = {}) {
   return '等待完成';
 }
 
+function isStaleRunningBackupRecord(backup = {}) {
+  if (String(backup.status || '').trim() !== 'running') {
+    return false;
+  }
+  const timestamp = Date.parse(backup.updatedAt || backup.createdAt || '');
+  const ageMs = Number.isFinite(timestamp) ? Date.now() - timestamp : Number.POSITIVE_INFINITY;
+  return ageMs >= 30 * 60 * 1000;
+}
+
 function renderBackupRecordRow(backup = {}, deletingBackupId = '') {
   const backupId = String(backup.id || '').trim();
   const isDeleting = backupId && backupId === String(deletingBackupId || '').trim();
   const isRunning = String(backup.status || '').trim() === 'running';
+  const isStaleRunning = isStaleRunningBackupRecord(backup);
   const isFailed = ['failed', 'error'].includes(String(backup.status || '').trim());
-  const statusLabel = backupStatusLabel(backup.status);
+  const statusLabel = isStaleRunning ? '异常中断' : backupStatusLabel(backup.status);
   const destinationLabel = systemBackupTargetMeta(backup.destination).label;
-  const storageStatus = backupStorageReadyLabel(backup);
+  const storageStatus = isStaleRunning ? '可清理' : backupStorageReadyLabel(backup);
   const triggerSourceLabel = backup.triggerSource === 'scheduled'
     ? '定时任务'
     : backup.triggerSource === 'pre_restore'
       ? '恢复前保护'
       : '手动执行';
-  const inlineNotice = backup.error
+  const inlineNotice = isStaleRunning
+    ? '<div class="notice warning backup-record-inline-notice">这条备份长时间停留在执行中，通常是程序重启或备份中断留下的异常记录，可以直接删除。</div>'
+    : backup.error
     ? `<div class="notice error backup-record-inline-notice">${escapeHtml(backup.error)}</div>`
     : backup.remotePath
       ? `<div class="backup-record-path">远程路径：<code>${escapeHtml(backup.remotePath)}</code></div>`
@@ -2558,7 +2649,7 @@ function renderBackupRecordRow(backup = {}, deletingBackupId = '') {
             type="button"
             data-action="delete-backup"
             data-backup-id="${escapeHtml(backupId)}"
-            ${backupId && !isDeleting && !isRunning ? '' : 'disabled'}
+            ${backupId && !isDeleting && (!isRunning || isStaleRunning) ? '' : 'disabled'}
           >
             ${isDeleting ? '删除中...' : '删除'}
           </button>

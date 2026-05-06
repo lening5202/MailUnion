@@ -139,6 +139,7 @@ const APP_REPOSITORY = `${APP_REPOSITORY_OWNER}/${APP_REPOSITORY_NAME}`;
 const APP_REPOSITORY_URL = `https://github.com/${APP_REPOSITORY}`;
 const VERSION_CHECK_CACHE_MS = 10 * 60 * 1000;
 const VERSION_UPDATE_COMMAND = trimString(process.env.MAILUNION_UPDATE_COMMAND || '');
+const APP_BUILD_TYPE = trimString(process.env.MAILUNION_BUILD_TYPE || (VERSION_UPDATE_COMMAND ? 'release' : 'source'));
 const googleOAuthRequests = new Map();
 const microsoftOAuthRequests = new Map();
 let cachedPackageMetadata = null;
@@ -353,7 +354,9 @@ function currentAppVersionInfo(options = {}) {
     repository: APP_REPOSITORY,
     repositoryUrl: APP_REPOSITORY_URL,
     releaseUrl: `${APP_REPOSITORY_URL}/releases/tag/${formatVersionTag(version)}`,
+    releasesUrl: `${APP_REPOSITORY_URL}/releases`,
     latestReleaseUrl: `${APP_REPOSITORY_URL}/releases/latest`,
+    buildType: APP_BUILD_TYPE,
     updateEnabled: Boolean(VERSION_UPDATE_COMMAND),
     updateRunning: Boolean(appUpdateState.running),
     updateState: safeUpdateState(options),
@@ -373,6 +376,8 @@ function sanitizeGitHubRelease(release = {}) {
     publishedAt: trimString(release.published_at || release.created_at || ''),
     prerelease: Boolean(release.prerelease),
     draft: Boolean(release.draft),
+    unavailable: false,
+    warning: '',
   };
 }
 
@@ -391,6 +396,22 @@ async function fetchLatestGitHubRelease(options = {}) {
       allowDirectFallback: true,
     },
   );
+
+  if (response.status === 404) {
+    const current = currentAppVersionInfo({ includeOutput: false });
+    return {
+      tag: current.tag,
+      version: current.version,
+      name: '暂无 GitHub Release',
+      url: `${APP_REPOSITORY_URL}/releases`,
+      body: '',
+      publishedAt: '',
+      prerelease: false,
+      draft: false,
+      unavailable: true,
+      warning: 'GitHub 仓库暂未发布 Release，暂时无法检查线上最新版本。',
+    };
+  }
 
   if (!response.ok) {
     throw new Error(`GitHub release check failed: HTTP ${response.status}.`);
@@ -421,8 +442,11 @@ async function checkLatestVersion(options = {}) {
       current,
       latest,
       isNewer,
+      buildType: current.buildType,
+      releaseUnavailable: Boolean(latest.unavailable),
       updateEnabled: current.updateEnabled,
       updateRunning: current.updateRunning,
+      warning: trimString(latest.warning || ''),
       error: '',
     };
     versionCheckCache = {
@@ -437,8 +461,11 @@ async function checkLatestVersion(options = {}) {
       current,
       latest: null,
       isNewer: false,
+      buildType: current.buildType,
+      releaseUnavailable: false,
       updateEnabled: current.updateEnabled,
       updateRunning: current.updateRunning,
+      warning: '',
       error: String(error.message || error),
     };
     versionCheckCache = {
@@ -2978,6 +3005,9 @@ function sanitizeBackupRecord(record) {
   }
 
   const localReady = Boolean(record.localPath && fs.existsSync(record.localPath));
+  const downloadable = localReady
+    && Number(record.sizeBytes || 0) > 0
+    && ['completed', 'success'].includes(String(record.status || '').trim());
 
   return {
     id: record.id,
@@ -2993,7 +3023,7 @@ function sanitizeBackupRecord(record) {
     error: String(record.error || '').trim(),
     createdAt: record.createdAt || null,
     updatedAt: record.updatedAt || null,
-    downloadUrl: localReady ? `/api/backups/${encodeURIComponent(record.id)}/download` : '',
+    downloadUrl: downloadable ? `/api/backups/${encodeURIComponent(record.id)}/download` : '',
   };
 }
 
